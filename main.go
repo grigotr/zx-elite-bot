@@ -11,7 +11,6 @@ import (
 
 var tapCount int64
 
-// Injectăm codul HTML direct în structura serverului pentru stabilitate maximă 24/7
 const htmlContent = `
 <!DOCTYPE html>
 <html lang="en">
@@ -93,7 +92,7 @@ const htmlContent = `
             floatText.classList.add('floating-text');
             floatText.innerText = '+1';
             floatText.style.left = x + "px";
-			floatText.style.top = y + "px";
+            floatText.style.top = y + "px";
             tapZone.appendChild(floatText);
             setTimeout(() => { floatText.remove(); }, 600);
 
@@ -125,41 +124,34 @@ func main() {
 	bot.Debug = false
 	log.Printf("🤖 ZX-Elite Reactor Core este ONLINE pentru %s!", bot.Self.UserName)
 
-	// Servim codul HTML direct din memorie (fără rute de fișiere)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Write([]byte(htmlContent))
 	})
 
-	// API simplu pentru înregistrarea acțiunilor
 	http.HandleFunc("/api/webapp", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-
 		if r.Method == "POST" {
 			atomic.AddInt64(&tapCount, 1)
-			log.Printf("⚡ Operațiune la distanță procesată! Total taps: %d", atomic.LoadInt64(&tapCount))
 			w.Write([]byte(`{"status":"success"}`))
 			return
 		}
 	})
 
-	// Ascultăm pe portul dinamic impus de serverul Cloud
 	go func() {
 		port := os.Getenv("PORT")
 		if port == "" {
-			port = "8080" // Port local de rezervă
+			port = "8080"
 		}
-		log.Printf("🌐 Reactor Web pornit pe portul %s", port)
 		if err := http.ListenAndServe(":"+port, nil); err != nil {
-			log.Fatal("❌ Eroare server web:", err)
+			log.Fatal(err)
 		}
 	}()
 
