@@ -410,7 +410,7 @@ body::before{
  }
 }
 
-/* Leaderboard styles (added) */
+/* Leaderboard styles */
 .leaderboardItem {
  display:flex;
  justify-content:space-between;
@@ -1070,12 +1070,29 @@ body::before{
 
 <script>
 
-const STORAGE_KEY =
-"zx-network-state";
+const STORAGE_KEY = "zx-network-state";
+const RIVALS_KEY = "zx-rivals";
 
-let state = JSON.parse(
- localStorage.getItem(STORAGE_KEY) || "{}"
-);
+// Inițializare rivali (persistenți)
+let rivals = JSON.parse(localStorage.getItem(RIVALS_KEY));
+if (!rivals) {
+  // Set inițial de rivali cu solduri de pornire
+  rivals = [
+    { name: "CryptoKing", balance: 250000 },
+    { name: "ZXWhale", balance: 180000 },
+    { name: "BlockchainLord", balance: 320000 },
+    { name: "TokenMaster", balance: 140000 },
+    { name: "NebulaHacker", balance: 400000 },
+    { name: "StarTrader", balance: 95000 },
+    { name: "QuantumMiner", balance: 210000 },
+    { name: "ApexGamer", balance: 75000 },
+    { name: "PhantomUser", balance: 165000 },
+    { name: "LuckyStrike", balance: 290000 }
+  ];
+  localStorage.setItem(RIVALS_KEY, JSON.stringify(rivals));
+}
+
+let state = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
 
 state = {
   balance: state.balance || 0,
@@ -1090,19 +1107,15 @@ state = {
 };
 
 function saveState(){
+ localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
 
- localStorage.setItem(
-  STORAGE_KEY,
-  JSON.stringify(state)
- );
-
+function saveRivals(){
+ localStorage.setItem(RIVALS_KEY, JSON.stringify(rivals));
 }
 
 function formatNumber(v){
-
- return Number(v)
- .toLocaleString("ro-RO");
-
+ return Number(v).toLocaleString("ro-RO");
 }
 
 // ─── UPGRADE COST FUNCTIONS ───
@@ -1114,29 +1127,29 @@ function getEnergyUpgradeCost() {
   return 2500 * Math.pow(state.energyLevel + 1, 2);
 }
 
-// ─── LEADERBOARD ───
-function generateFakePlayers() {
-  var names = [
-    "CryptoKing", "ZXWhale", "BlockchainLord", "TokenMaster", "NebulaHacker",
-    "StarTrader", "QuantumMiner", "ApexGamer", "PhantomUser", "LuckyStrike"
-  ];
+// ─── LEADERBOARD (RIVALI REALI SIMULAȚI) ───
+function updateLeaderboard() {
+  // Fiecare rival primește un bonus aleatoriu (între 0 și 2000 ZX) – simulăm că joacă
+  for (var i = 0; i < rivals.length; i++) {
+    rivals[i].balance += Math.floor(Math.random() * 2001);
+  }
+  // Salvează noile solduri ale rivalilor
+  saveRivals();
+
+  // Creăm lista combinată: rivali + utilizatorul curent
   var players = [];
-  for (var i = 0; i < names.length; i++) {
-    players.push({
-      name: names[i],
-      balance: Math.floor(Math.random() * 500000) + 100000
-    });
+  for (var i = 0; i < rivals.length; i++) {
+    players.push({ name: rivals[i].name, balance: rivals[i].balance, isUser: false });
   }
   players.push({ name: "Tu", balance: state.balance, isUser: true });
-  players.sort(function(a, b) { return b.balance - a.balance; });
-  return players;
-}
 
-function updateLeaderboard() {
-  var players = generateFakePlayers();
+  // Sortare descrescătoare
+  players.sort(function(a, b) { return b.balance - a.balance; });
+
   var board = document.getElementById("leaderboard");
   if (!board) return;
   board.innerHTML = "";
+
   for (var i = 0; i < players.length; i++) {
     var p = players[i];
     var div = document.createElement("div");
@@ -1147,6 +1160,7 @@ function updateLeaderboard() {
       '<span class="leaderboardBalance">' + formatNumber(p.balance) + ' ZX</span>';
     board.appendChild(div);
   }
+
   var userRank = players.findIndex(function(p) { return p.isUser; }) + 1;
   document.getElementById("myRank").innerText = "#" + userRank;
   document.getElementById("myBalance").innerText = formatNumber(state.balance) + " ZX";
@@ -1155,284 +1169,115 @@ function updateLeaderboard() {
 // ─── MAIN UI UPDATE ───
 function updateUI(){
 
- document
- .getElementById(
- "balanceDisplay"
- )
- .innerText =
- formatNumber(
- state.balance
- );
+ document.getElementById("balanceDisplay").innerText = formatNumber(state.balance);
+ document.getElementById("walletBalance").innerText = formatNumber(state.balance);
+ document.getElementById("myBalance").innerText = formatNumber(state.balance) + " ZX";
 
- document
- .getElementById(
- "walletBalance"
- )
- .innerText =
- formatNumber(
- state.balance
- );
+ const percent = (state.energy / state.maxEnergy) * 100;
+ document.getElementById("energyFill").style.width = percent + "%";
 
- document
- .getElementById(
- "myBalance"
- )
- .innerText =
- formatNumber(
- state.balance
- ) + " ZX";
-
- // Bara de energie (fără text)
- const percent =
- (state.energy /
- state.maxEnergy)
- * 100;
-
- document
- .getElementById(
- "energyFill"
- )
- .style.width =
- percent + "%";
-
- // Starea butoanelor de upgrade (disabled / enabled)
  const tapBtn = document.getElementById("buyTapUpgrade");
  tapBtn.disabled = state.balance < getTapUpgradeCost();
 
  const energyBtn = document.getElementById("buyEnergyUpgrade");
  energyBtn.disabled = state.balance < getEnergyUpgradeCost();
 
- // Leaderboard
  updateLeaderboard();
 }
 
-// ─── GAIN TAP (cu coordonatele click-ului) ───
+// ─── GAIN TAP ───
 function gainTap(event){
-
  if(state.energy <= 0) return;
 
  const gain = 1 + state.tapLevel;
-
  state.balance += gain;
-
  state.energy -= 1;
 
- // Coordonatele click-ului (relative la viewport)
  const x = event.clientX;
  const y = event.clientY;
-
  spawnFloat(gain, x, y);
 
  saveState();
-
  updateUI();
-
 }
 
-// ─── SPAWN FLOAT (poziționare exactă la click) ───
 function spawnFloat(value, posX, posY){
-
  const el = document.createElement("div");
-
  el.className = "floatGain";
-
  el.innerText = "+" + value;
-
  el.style.left = posX + "px";
-
  el.style.top  = posY + "px";
-
  document.body.appendChild(el);
-
- setTimeout(function() {
-
-  el.remove();
-
- }, 900);
-
+ setTimeout(function() { el.remove(); }, 900);
 }
 
-// Legătura evenimentului de click (transmite evenimentul)
 document.getElementById("coin").addEventListener("click", gainTap);
 
 // TABS
-
-document
-.querySelectorAll(".tabBtn")
-.forEach(btn => {
-
+document.querySelectorAll(".tabBtn").forEach(btn => {
  btn.addEventListener("click", () => {
-
-  document
-  .querySelectorAll(".tabBtn")
-  .forEach(b =>
-   b.classList.remove("active")
-  );
-
+  document.querySelectorAll(".tabBtn").forEach(b => b.classList.remove("active"));
   btn.classList.add("active");
-
-  const tab =
-  btn.dataset.tab;
-
-  document
-  .getElementById("generatorTab")
-  .classList.add("hidden");
-
-  document
-  .getElementById("tasksTab")
-  .classList.add("hidden");
-
-  document
-  .getElementById("walletTab")
-  .classList.add("hidden");
-
-  document
-  .getElementById("rankTab")
-  .classList.add("hidden");
-
-  document
-  .getElementById(tab + "Tab")
-  .classList.remove("hidden");
-
+  const tab = btn.dataset.tab;
+  document.getElementById("generatorTab").classList.add("hidden");
+  document.getElementById("tasksTab").classList.add("hidden");
+  document.getElementById("walletTab").classList.add("hidden");
+  document.getElementById("rankTab").classList.add("hidden");
+  document.getElementById(tab + "Tab").classList.remove("hidden");
  });
-
 });
 
 // TASKS
-
 function claimTask(id, reward, btn){
-
  if(state.claimedTasks[id]) return;
-
  state.claimedTasks[id] = true;
-
  state.balance += reward;
-
  btn.innerText = "Claimed";
-
  btn.disabled = true;
-
  saveState();
-
  updateUI();
-
 }
 
-document
-.getElementById("taskTelegram")
-.addEventListener("click",
- function(){
-  claimTask("tg",500,this);
- }
-);
+document.getElementById("taskTelegram").addEventListener("click", function(){ claimTask("tg",500,this); });
+document.getElementById("taskPartner").addEventListener("click", function(){ claimTask("partner",2000,this); });
 
-document
-.getElementById("taskPartner")
-.addEventListener("click",
- function(){
-  claimTask("partner",2000,this);
- }
-);
-
-// AD TASK
-
-document
-.getElementById("watchAdBtn")
-.addEventListener("click", () => {
-
+document.getElementById("watchAdBtn").addEventListener("click", () => {
  state.balance += 1000;
-
  saveState();
-
  updateUI();
-
 });
 
 // WALLET
-
-document
-.getElementById("connectWallet")
-.addEventListener("click", () => {
-
+document.getElementById("connectWallet").addEventListener("click", () => {
  state.walletConnected = true;
-
- state.walletAddress =
- "EQB-" +
- Math.random()
- .toString(36)
- .substring(2,12);
-
- document
- .getElementById("walletAddress")
- .style.display =
- "block";
-
- document
- .getElementById("walletAddress")
- .innerText =
- state.walletAddress;
-
+ state.walletAddress = "EQB-" + Math.random().toString(36).substring(2,12);
+ document.getElementById("walletAddress").style.display = "block";
+ document.getElementById("walletAddress").innerText = state.walletAddress;
  saveState();
-
  updateUI();
-
 });
 
 // RECHARGE ADS
-
 let adCount = 0;
-
-document
-.getElementById("rechargeBtn")
-.addEventListener("click", () => {
-
- document
- .getElementById("rechargeModal")
- .style.display = "flex";
-
+document.getElementById("rechargeBtn").addEventListener("click", () => {
+ document.getElementById("rechargeModal").style.display = "flex";
  adCount = 0;
-
- document
- .getElementById("adCounter")
- .innerText = "0 / 3";
-
+ document.getElementById("adCounter").innerText = "0 / 3";
 });
-
-document
-.getElementById("watchRechargeAd")
-.addEventListener("click", () => {
-
+document.getElementById("watchRechargeAd").addEventListener("click", () => {
  adCount++;
-
- document
- .getElementById("adCounter")
- .innerText =
- adCount + " / 3";
-
+ document.getElementById("adCounter").innerText = adCount + " / 3";
  if(adCount >= 3){
-
-  state.energy =
-  state.maxEnergy;
-
+  state.energy = state.maxEnergy;
   saveState();
-
   updateUI();
-
  }
-
+});
+document.getElementById("closeRecharge").addEventListener("click", () => {
+ document.getElementById("rechargeModal").style.display = "none";
 });
 
-document
-.getElementById("closeRecharge")
-.addEventListener("click", () => {
-
- document
- .getElementById("rechargeModal")
- .style.display = "none";
-
-});
-
-// ─── UPGRADE BUTTONS (logică păstrată) ───
+// UPGRADE BUTTONS
 document.getElementById("buyTapUpgrade").addEventListener("click", () => {
   const cost = getTapUpgradeCost();
   if (state.balance < cost) return;
@@ -1454,7 +1299,6 @@ document.getElementById("buyEnergyUpgrade").addEventListener("click", () => {
 });
 
 // INIT
-
 updateUI();
 
 </script>
