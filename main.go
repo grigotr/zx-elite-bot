@@ -462,7 +462,6 @@ body::before{
  }
 }
 
-/* ---------- LEADERBOARD STYLES ---------- */
 .leaderboardItem {
  display:flex;
  justify-content:space-between;
@@ -990,7 +989,6 @@ body::before{
 
  </h2>
 
- <!-- Acest div va fi populat dinamic -->
  <div id="leaderboard"></div>
 
  <div
@@ -1242,46 +1240,48 @@ function getEnergyUpgradeCost() {
   return 2500 * Math.pow(state.energyLevel + 1, 2);
 }
 
-// ---------- LEADERBOARD FUNCTIONS (NEW) ----------
+// ---------- LEADERBOARD FUNCTIONS ----------
 function generateFakePlayers() {
-  // Nume de jucători simulatori
-  const names = ["CryptoKing", "ZXWhale", "BlockchainLord", "TokenMaster", "NebulaHacker",
-                 "StarTrader", "QuantumMiner", "ApexGamer", "PhantomUser", "LuckyStrike"];
-  // Generăm balanțe aleatorii între 100k și 600k
-  let players = names.map(name => ({
-    name: name,
-    balance: Math.floor(Math.random() * 500000) + 100000
-  }));
+  var names = ["CryptoKing", "ZXWhale", "BlockchainLord", "TokenMaster", "NebulaHacker",
+               "StarTrader", "QuantumMiner", "ApexGamer", "PhantomUser", "LuckyStrike"];
+  var players = names.map(function(name) {
+    return {
+      name: name,
+      balance: Math.floor(Math.random() * 500000) + 100000
+    };
+  });
 
   // Adăugăm utilizatorul real
   players.push({ name: "Tu", balance: state.balance, isUser: true });
 
   // Sortăm descrescător după balanță
-  players.sort((a, b) => b.balance - a.balance);
+  players.sort(function(a, b) {
+    return b.balance - a.balance;
+  });
   return players;
 }
 
 function updateLeaderboard() {
-  const players = generateFakePlayers();
-  const leaderboardDiv = document.getElementById("leaderboard");
+  var players = generateFakePlayers();
+  var leaderboardDiv = document.getElementById("leaderboard");
   if (!leaderboardDiv) return;
 
-  // Goliți conținutul existent
+  // Golește conținutul existent
   leaderboardDiv.innerHTML = "";
 
-  // Adăugăm fiecare jucător
-  players.forEach((player, index) => {
-    const item = document.createElement("div");
+  // Adaugă fiecare jucător
+  for (var i = 0; i < players.length; i++) {
+    var player = players[i];
+    var item = document.createElement("div");
     item.className = "leaderboardItem";
-    item.innerHTML = 
-      `<span class="leaderboardRank">#${index + 1}</span>
-       <span class="leaderboardName" style="${player.isUser ? 'color:#00ff87; font-weight:bold' : ''}">${player.name}</span>
-       <span class="leaderboardBalance">${formatNumber(player.balance)} ZX</span>`;
+    item.innerHTML = '<span class="leaderboardRank">#' + (i + 1) + '</span>' +
+                     '<span class="leaderboardName" style="' + (player.isUser ? 'color:#00ff87; font-weight:bold' : '') + '">' + player.name + '</span>' +
+                     '<span class="leaderboardBalance">' + formatNumber(player.balance) + ' ZX</span>';
     leaderboardDiv.appendChild(item);
-  });
+  }
 
-  // Actualizăm poziția utilizatorului
-  const userRank = players.findIndex(p => p.isUser) + 1;
+  // Actualizează poziția utilizatorului
+  var userRank = players.findIndex(function(p) { return p.isUser; }) + 1;
   document.getElementById("myRank").innerText = "#" + userRank;
   document.getElementById("myBalance").innerText = formatNumber(state.balance) + " ZX";
 }
@@ -1621,7 +1621,7 @@ updateUI();
 
 func main() {
 
-	// Token bot (direct în cod, așa cum ai cerut)
+	// Token bot
 	token := "8744648391:AAHbsnd54wrv686PkLCbtj4ueBm4DqEB4vQ"
 
 	bot, err := tgbotapi.NewBotAPI(token)
