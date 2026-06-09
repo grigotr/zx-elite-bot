@@ -406,34 +406,31 @@ body::before{
  display:none;
 }
 
+/* Floating Text – alb, conturat, animat */
 .floatGain{
  position:fixed;
-
- color:#ffffff;
-
+ color:white;
  font-weight:900;
- font-size:24px;
-
- text-shadow: 0 0 15px rgba(0,255,135,0.9);
-
+ font-size:22px;
  pointer-events:none;
-
- animation:
- floatUp 1s ease-out forwards;
+ z-index:9999;
+ text-shadow:
+   -1px -1px 0 #000,
+    1px -1px 0 #000,
+   -1px  1px 0 #000,
+    1px  1px 0 #000,
+    0 0 8px rgba(0,255,135,0.8);
+ animation: floatUp 0.9s ease-out forwards;
 }
 
 @keyframes floatUp{
-
  from{
   opacity:1;
-  transform:
-   translateY(0px);
+  transform: translateY(0px);
  }
-
  to{
   opacity:0;
-  transform:
-   translateY(-100px);
+  transform: translateY(-100px);
  }
 }
 
@@ -1312,43 +1309,53 @@ function updateUI(){
  updateLeaderboard();
 }
 
-// ─── TAP CU COORDONATE REALE ───
-function gainTap(event) {
-  if (state.energy <= 0) return;
+// ─── GAIN TAP (cu coordonatele click-ului) ───
+function gainTap(event){
 
-  const gain = 1 + state.tapLevel; // valoare dinamică
-  state.balance += gain;
-  state.energy -= 1;
+ if(state.energy <= 0) return;
 
-  // Coordonatele click-ului (relative la viewport)
-  const x = event.clientX;
-  const y = event.clientY;
+ const gain = 1 + state.tapLevel;
 
-  spawnFloat(gain, x, y);
+ state.balance += gain;
 
-  saveState();
-  updateUI();
+ state.energy -= 1;
+
+ // Coordonatele click-ului (relative la viewport)
+ const x = event.clientX;
+ const y = event.clientY;
+
+ spawnFloat(gain, x, y);
+
+ saveState();
+
+ updateUI();
+
 }
 
-// ─── FLOATING TEXT LA POZIȚIA CLICK-ULUI ───
-function spawnFloat(value, posX, posY) {
-  const el = document.createElement("div");
-  el.className = "floatGain";
-  el.innerText = "+" + value;
+// ─── SPAWN FLOAT (poziționare exactă la click) ───
+function spawnFloat(value, posX, posY){
 
-  // Poziționare absolută la coordonatele click-ului
-  el.style.left = posX + "px";
-  el.style.top  = posY + "px";
+ const el = document.createElement("div");
 
-  document.body.appendChild(el);
+ el.className = "floatGain";
 
-  // Elimină elementul după terminarea animației (1s)
-  setTimeout(() => {
-    el.remove();
-  }, 1000);
+ el.innerText = "+" + value;
+
+ el.style.left = posX + "px";
+
+ el.style.top  = posY + "px";
+
+ document.body.appendChild(el);
+
+ setTimeout(function() {
+
+  el.remove();
+
+ }, 900);
+
 }
 
-// Evenimentul de click pe monedă
+// Legătura evenimentului de click (transmite evenimentul)
 document.getElementById("coin").addEventListener("click", gainTap);
 
 // TABS
