@@ -409,14 +409,17 @@ body::before{
 .floatGain{
  position:fixed;
 
- color:#8effdf;
+ color:#ffffff;
 
  font-weight:900;
+ font-size:24px;
+
+ text-shadow: 0 0 15px rgba(0,255,135,0.9);
 
  pointer-events:none;
 
  animation:
- floatUp .9s ease-out forwards;
+ floatUp 1s ease-out forwards;
 }
 
 @keyframes floatUp{
@@ -430,7 +433,7 @@ body::before{
  to{
   opacity:0;
   transform:
-   translateY(-80px);
+   translateY(-100px);
  }
 }
 
@@ -1309,57 +1312,44 @@ function updateUI(){
  updateLeaderboard();
 }
 
-function gainTap(){
+// ─── TAP CU COORDONATE REALE ───
+function gainTap(event) {
+  if (state.energy <= 0) return;
 
- if(state.energy <= 0) return;
+  const gain = 1 + state.tapLevel; // valoare dinamică
+  state.balance += gain;
+  state.energy -= 1;
 
- const gain =
-  1 + state.tapLevel;
+  // Coordonatele click-ului (relative la viewport)
+  const x = event.clientX;
+  const y = event.clientY;
 
- state.balance += gain;
+  spawnFloat(gain, x, y);
 
- state.energy -= 1;
-
- spawnFloat(gain);
-
- saveState();
-
- updateUI();
-
+  saveState();
+  updateUI();
 }
 
-function spawnFloat(value){
+// ─── FLOATING TEXT LA POZIȚIA CLICK-ULUI ───
+function spawnFloat(value, posX, posY) {
+  const el = document.createElement("div");
+  el.className = "floatGain";
+  el.innerText = "+" + value;
 
- const el =
- document.createElement("div");
+  // Poziționare absolută la coordonatele click-ului
+  el.style.left = posX + "px";
+  el.style.top  = posY + "px";
 
- el.className =
- "floatGain";
+  document.body.appendChild(el);
 
- el.innerText =
- "+" + value;
-
- el.style.left =
- (window.innerWidth/2) + "px";
-
- el.style.top =
- (window.innerHeight/2) + "px";
-
- document.body.appendChild(el);
-
- setTimeout(() => {
-
-  el.remove();
-
- }, 900);
-
+  // Elimină elementul după terminarea animației (1s)
+  setTimeout(() => {
+    el.remove();
+  }, 1000);
 }
 
-document
-.getElementById("coin")
-.addEventListener("click",
- gainTap
-);
+// Evenimentul de click pe monedă
+document.getElementById("coin").addEventListener("click", gainTap);
 
 // TABS
 
