@@ -213,16 +213,6 @@ body::before{
  transform:scale(.94);
 }
 
-.tapHint{
- margin-top:10px;
-
- color:var(--muted);
-
- font-size:12px;
- text-transform:uppercase;
- letter-spacing:1px;
-}
-
 .energyRow{
  margin-top:24px;
 
@@ -485,7 +475,6 @@ body::before{
 
 </header>
 
-<!-- BALANȚA A FOST MUTATĂ ÎN ACEEAȘI SECȚIUNE CU MONEDA -->
 <div class="page">
 
 <div
@@ -506,7 +495,7 @@ body::before{
 
  <div class="coinArea">
 
-  <!-- Moneda ZX redesenată cu traiectorii vectoriale, fără text copiabil -->
+  <!-- Moneda ZX cu literele ca traiectorii vectoriale -->
   <svg
    id="coin"
    class="coin"
@@ -549,7 +538,7 @@ body::before{
    <rect x="230" y="230" width="40" height="40" fill="none" stroke="#00ff87" stroke-width="1.5"/>
    <circle cx="250" cy="250" r="12" fill="#00ff87" opacity="0.3"/>
 
-   <!-- Literele Z și X ca grafică vectorială (nu text) -->
+   <!-- Literele Z și X ca traiectorii vectoriale (nu text) -->
    <g filter="url(#glow)">
      <!-- Z -->
      <path d="M 170 180 L 330 180 L 170 320 L 330 320"
@@ -561,10 +550,6 @@ body::before{
            stroke-linecap="round" stroke-linejoin="round"/>
    </g>
   </svg>
-
-  <div class="tapHint">
-   Tap pentru ZX Tokens
-  </div>
 
  </div>
 
