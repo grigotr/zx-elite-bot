@@ -1514,79 +1514,42 @@ updateUI();
 `
 
 func main() {
+	// Token-ul bot-ului introdus direct (NU este recomandat în producție)
+	token := "8744648391:AAHbsnd54wrv686PkLCbtj4ueBm4DqEB4vQ"
 
-	token :=
-		os.Getenv("TELEGRAM_BOT_TOKEN")
-
-	if token == "" {
-
-		log.Println(
-			"Missing TELEGRAM_BOT_TOKEN",
-		)
-
-	}
-
-	bot, err :=
-		tgbotapi.NewBotAPI(token)
-
+	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	go func() {
-
 		u := tgbotapi.NewUpdate(0)
-
 		u.Timeout = 60
 
 		updates := bot.GetUpdatesChan(u)
 
 		for update := range updates {
-
 			if update.Message == nil {
 				continue
 			}
 
 			if update.Message.Text == "/start" {
-
-				msg :=
-					tgbotapi.NewMessage(
-						update.Message.Chat.ID,
-						"ZX WebApp is live",
-					)
-
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "ZX WebApp is live")
 				bot.Send(msg)
-
 			}
-
 		}
-
 	}()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-
-		w.Header().Set(
-			"Content-Type",
-			"text/html",
-		)
-
+		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(webAppHTML))
-
 	})
 
 	port := os.Getenv("PORT")
-
 	if port == "" {
 		port = "8080"
 	}
 
 	log.Println("Running on :" + port)
-
-	log.Fatal(
-		http.ListenAndServe(
-			":"+port,
-			nil,
-		),
-	)
-
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
