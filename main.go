@@ -146,28 +146,10 @@ body::before{
  0 0 18px rgba(0,245,212,.25);
 }
 
-.balanceWrap{
- padding:18px;
-}
-
-.balanceCard{
- background:
- linear-gradient(
- 180deg,
- rgba(17,27,43,.95),
- rgba(13,20,32,.95)
- );
-
- border:
- 1px solid rgba(0,245,212,.18);
-
- border-radius:26px;
-
- padding:22px;
-
- box-shadow:
- 0 0 35px rgba(0,245,212,.15),
- 0 0 60px rgba(0,245,212,.08);
+/* BALANȚA CENTRATĂ DEASUPRA MONEDEI */
+.balance-container {
+  text-align: center;
+  margin-bottom: 10px;
 }
 
 .balanceTitle{
@@ -503,31 +485,24 @@ body::before{
 
 </header>
 
-<div class="balanceWrap">
-
- <div class="balanceCard">
-
-   <div class="balanceTitle">
-     Total ZX Tokens
-   </div>
-
-   <div
-    id="balanceDisplay"
-    class="balanceValue">
-
-    0
-
-   </div>
-
- </div>
-
-</div>
-
+<!-- BALANȚA A FOST MUTATĂ ÎN ACEEAȘI SECȚIUNE CU MONEDA -->
 <div class="page">
 
 <div
  id="generatorTab"
  class="section">
+
+ <!-- Balanța centrată -->
+ <div class="balance-container">
+   <div class="balanceTitle">
+     Total ZX Tokens
+   </div>
+   <div
+    id="balanceDisplay"
+    class="balanceValue">
+    0
+   </div>
+ </div>
 
  <div class="coinArea">
 
