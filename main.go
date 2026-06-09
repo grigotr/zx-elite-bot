@@ -11,7 +11,6 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// Structuri pentru API
 type PlayerUpdate struct {
 	UserID   string `json:"userId"`
 	UserName string `json:"userName"`
