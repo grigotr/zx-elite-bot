@@ -462,6 +462,7 @@ body::before{
  }
 }
 
+/* Leaderboard styles (added) */
 .leaderboardItem {
  display:flex;
  justify-content:space-between;
@@ -989,7 +990,9 @@ body::before{
 
  </h2>
 
- <div id="leaderboard"></div>
+ <div id="leaderboard">
+
+ </div>
 
  <div
   style="
@@ -1231,7 +1234,7 @@ function formatNumber(v){
 
 }
 
-// ---------- UPGRADE COST FUNCTIONS ----------
+// ─── UPGRADE COST FUNCTIONS ───
 function getTapUpgradeCost() {
   return 1000 * Math.pow(state.tapLevel + 1, 2);
 }
@@ -1240,53 +1243,45 @@ function getEnergyUpgradeCost() {
   return 2500 * Math.pow(state.energyLevel + 1, 2);
 }
 
-// ---------- LEADERBOARD FUNCTIONS ----------
+// ─── LEADERBOARD ───
 function generateFakePlayers() {
-  var names = ["CryptoKing", "ZXWhale", "BlockchainLord", "TokenMaster", "NebulaHacker",
-               "StarTrader", "QuantumMiner", "ApexGamer", "PhantomUser", "LuckyStrike"];
-  var players = names.map(function(name) {
-    return {
-      name: name,
+  var names = [
+    "CryptoKing", "ZXWhale", "BlockchainLord", "TokenMaster", "NebulaHacker",
+    "StarTrader", "QuantumMiner", "ApexGamer", "PhantomUser", "LuckyStrike"
+  ];
+  var players = [];
+  for (var i = 0; i < names.length; i++) {
+    players.push({
+      name: names[i],
       balance: Math.floor(Math.random() * 500000) + 100000
-    };
-  });
-
-  // Adăugăm utilizatorul real
+    });
+  }
   players.push({ name: "Tu", balance: state.balance, isUser: true });
-
-  // Sortăm descrescător după balanță
-  players.sort(function(a, b) {
-    return b.balance - a.balance;
-  });
+  players.sort(function(a, b) { return b.balance - a.balance; });
   return players;
 }
 
 function updateLeaderboard() {
   var players = generateFakePlayers();
-  var leaderboardDiv = document.getElementById("leaderboard");
-  if (!leaderboardDiv) return;
-
-  // Golește conținutul existent
-  leaderboardDiv.innerHTML = "";
-
-  // Adaugă fiecare jucător
+  var board = document.getElementById("leaderboard");
+  if (!board) return;
+  board.innerHTML = "";
   for (var i = 0; i < players.length; i++) {
-    var player = players[i];
-    var item = document.createElement("div");
-    item.className = "leaderboardItem";
-    item.innerHTML = '<span class="leaderboardRank">#' + (i + 1) + '</span>' +
-                     '<span class="leaderboardName" style="' + (player.isUser ? 'color:#00ff87; font-weight:bold' : '') + '">' + player.name + '</span>' +
-                     '<span class="leaderboardBalance">' + formatNumber(player.balance) + ' ZX</span>';
-    leaderboardDiv.appendChild(item);
+    var p = players[i];
+    var div = document.createElement("div");
+    div.className = "leaderboardItem";
+    div.innerHTML =
+      '<span class="leaderboardRank">#' + (i + 1) + '</span>' +
+      '<span class="leaderboardName" style="' + (p.isUser ? 'color:#00ff87; font-weight:bold' : '') + '">' + p.name + '</span>' +
+      '<span class="leaderboardBalance">' + formatNumber(p.balance) + ' ZX</span>';
+    board.appendChild(div);
   }
-
-  // Actualizează poziția utilizatorului
   var userRank = players.findIndex(function(p) { return p.isUser; }) + 1;
   document.getElementById("myRank").innerText = "#" + userRank;
   document.getElementById("myBalance").innerText = formatNumber(state.balance) + " ZX";
 }
 
-// ---------- UPDATE UI (MODIFICAT) ----------
+// ─── MAIN UI UPDATE ───
 function updateUI(){
 
  document
@@ -1337,11 +1332,10 @@ function updateUI(){
  .style.width =
  percent + "%";
 
- // ---------- UPGRADE UI UPDATE ----------
+ // Upgrade display & button states
  const tapCost = getTapUpgradeCost();
  document.getElementById("tapLevel").innerText = "Nivel " + state.tapLevel;
  document.getElementById("tapCost").innerText = "Cost: " + formatNumber(tapCost) + " ZX";
-
  const tapBtn = document.getElementById("buyTapUpgrade");
  tapBtn.disabled = state.balance < tapCost;
  tapBtn.innerText = tapBtn.disabled ? "Fonduri insuficiente" : "Upgrade";
@@ -1349,12 +1343,11 @@ function updateUI(){
  const energyCost = getEnergyUpgradeCost();
  document.getElementById("energyLevel").innerText = "Max " + state.maxEnergy;
  document.getElementById("energyCost").innerText = "Cost: " + formatNumber(energyCost) + " ZX";
-
  const energyBtn = document.getElementById("buyEnergyUpgrade");
  energyBtn.disabled = state.balance < energyCost;
  energyBtn.innerText = energyBtn.disabled ? "Fonduri insuficiente" : "Upgrade";
 
- // ---------- LEADERBOARD UPDATE ----------
+ // Leaderboard
  updateLeaderboard();
 }
 
@@ -1587,7 +1580,7 @@ document
 
 });
 
-// ---------- UPGRADE BUTTON EVENTS ----------
+// ─── UPGRADE BUTTONS (added) ───
 document.getElementById("buyTapUpgrade").addEventListener("click", () => {
   const cost = getTapUpgradeCost();
   if (state.balance < cost) return;
@@ -1609,6 +1602,7 @@ document.getElementById("buyEnergyUpgrade").addEventListener("click", () => {
 });
 
 // INIT
+
 updateUI();
 
 </script>
@@ -1621,7 +1615,7 @@ updateUI();
 
 func main() {
 
-	// Token bot
+	// Token bot (direct în cod, așa cum ai cerut)
 	token := "8744648391:AAHbsnd54wrv686PkLCbtj4ueBm4DqEB4vQ"
 
 	bot, err := tgbotapi.NewBotAPI(token)
