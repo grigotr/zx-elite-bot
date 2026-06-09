@@ -18,8 +18,12 @@ type PlayerUpdate struct {
 	Balance  int    `json:"balance"`
 }
 
+type DeleteRequest struct {
+	UserID string `json:"userId"`
+}
+
 type LeaderboardEntry struct {
-	Name   string `json:"name"`
+	Name    string `json:"name"`
 	Balance int    `json:"balance"`
 	UserID  string `json:"userId"`
 }
@@ -56,6 +60,29 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ok"))
 }
 
+func handleDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req DeleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	if req.UserID == "" {
+		http.Error(w, "Missing userId", http.StatusBadRequest)
+		return
+	}
+
+	playersMu.Lock()
+	delete(players, req.UserID)
+	playersMu.Unlock()
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("deleted"))
+}
+
 func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	playersMu.RLock()
 	defer playersMu.RUnlock()
@@ -72,7 +99,7 @@ func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	var entries []LeaderboardEntry
 	for _, p := range list {
 		entries = append(entries, LeaderboardEntry{
-			Name:   p.UserName,
+			Name:    p.UserName,
 			Balance: p.Balance,
 			UserID:  p.UserID,
 		})
@@ -363,6 +390,12 @@ body::before{
  cursor:not-allowed;
 }
 
+.btn-danger{
+ background: linear-gradient(135deg, #ff4d4d, #ff6666);
+ color: #fff;
+ box-shadow: 0 0 20px rgba(255,77,77,0.3);
+}
+
 .upgrades{
  margin-top:22px;
 
@@ -497,6 +530,11 @@ body::before{
 .leaderboardRank { width:30px; color:var(--green); font-weight:bold; }
 .leaderboardName { flex:1; }
 .leaderboardBalance { color:#fff; }
+
+/* Delete account button spacing */
+.delete-section {
+  margin-top: 20px;
+}
 </style>
 </head>
 
@@ -811,6 +849,13 @@ body::before{
 
   </div>
 
+ </div>
+
+ <!-- Buton de ștergere cont -->
+ <div class="delete-section">
+  <button id="deleteAccountBtn" class="btn btn-danger" style="width:100%;">
+   Șterge contul
+  </button>
  </div>
 
  <h3
@@ -1214,6 +1259,32 @@ function syncWithServer() {
   }).catch(console.error);
 }
 
+// ─── Delete account ───
+async function deleteAccount() {
+  if (!confirm('Ești sigur că vrei să ștergi contul? Toate datele tale vor fi pierdute permanent.')) return;
+
+  // Șterge datele din server
+  if (currentUser.id !== 'guest') {
+    try {
+      await fetch('/api/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser.id })
+      });
+    } catch(e) {
+      console.error(e);
+    }
+  }
+
+  // Șterge tot localStorage
+  localStorage.removeItem(STORAGE_KEY);
+
+  // Reîncarcă pagina (pornești de la zero)
+  location.reload();
+}
+
+document.getElementById('deleteAccountBtn').addEventListener('click', deleteAccount);
+
 // ─── Leaderboard fetch ───
 async function fetchLeaderboard() {
   try {
@@ -1575,8 +1646,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Endpoint-uri API pentru clasament global
+	// Endpoint-uri API
 	http.HandleFunc("/api/update", handleUpdate)
+	http.HandleFunc("/api/delete", handleDelete)
 	http.HandleFunc("/api/leaderboard", handleLeaderboard)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
