@@ -1,8 +1,6 @@
-```go
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -860,6 +858,7 @@ body::before{
   Withdrawal History
 
  </h3>
+
 <table
  style="
  width:100%;
@@ -1188,38 +1187,23 @@ body::before{
 const STORAGE_KEY =
 "zx-network-state";
 
-let state =
-JSON.parse(
- localStorage.getItem(
- STORAGE_KEY
- ) || "{}"
+// Load state with full defaults
+let state = JSON.parse(
+ localStorage.getItem(STORAGE_KEY) || "{}"
 );
 
-if(!state.balance){
-
- state = {
-
-  balance:0,
-
-  energy:500,
-
-  maxEnergy:500,
-
-  tapLevel:0,
-
-  energyLevel:0,
-
-  rechargeAds:0,
-
-  walletConnected:false,
-
-  walletAddress:"",
-
-  claimedTasks:{}
-
- };
-
-}
+// Ensure all properties exist to avoid undefined errors
+state = {
+  balance: state.balance || 0,
+  energy: state.energy || 500,
+  maxEnergy: state.maxEnergy || 500,
+  tapLevel: state.tapLevel || 0,
+  energyLevel: state.energyLevel || 0,
+  rechargeAds: state.rechargeAds || 0,
+  walletConnected: state.walletConnected || false,
+  walletAddress: state.walletAddress || "",
+  claimedTasks: state.claimedTasks || {}
+};
 
 function saveState(){
 
@@ -1286,6 +1270,8 @@ function updateUI(){
  )
  .style.width =
  percent + "%";
+} // <-- ACESTA ESTE ACOLADA CARE LIPSA
+
 function gainTap(){
 
  if(state.energy <= 0) return;
@@ -1525,82 +1511,82 @@ updateUI();
 
 </body>
 </html>
-
+`
 
 func main() {
 
- token :=
- os.Getenv("TELEGRAM_BOT_TOKEN")
+	token :=
+		os.Getenv("TELEGRAM_BOT_TOKEN")
 
- if token == "" {
+	if token == "" {
 
-  log.Println(
-   "Missing TELEGRAM_BOT_TOKEN"
-  )
+		log.Println(
+			"Missing TELEGRAM_BOT_TOKEN",
+		)
 
- }
+	}
 
- bot, err :=
- tgbotapi.NewBotAPI(token)
+	bot, err :=
+		tgbotapi.NewBotAPI(token)
 
- if err != nil {
-  log.Fatal(err)
- }
+	if err != nil {
+		log.Fatal(err)
+	}
 
- go func() {
+	go func() {
 
-  u := tgbotapi.NewUpdate(0)
+		u := tgbotapi.NewUpdate(0)
 
-  u.Timeout = 60
+		u.Timeout = 60
 
-  updates := bot.GetUpdatesChan(u)
+		updates := bot.GetUpdatesChan(u)
 
-  for update := range updates {
+		for update := range updates {
 
-   if update.Message == nil {
-    continue
-   }
+			if update.Message == nil {
+				continue
+			}
 
-   if update.Message.Text == "/start" {
+			if update.Message.Text == "/start" {
 
-    msg :=
-    tgbotapi.NewMessage(
-     update.Message.Chat.ID,
-     "ZX WebApp is live"
-    )
+				msg :=
+					tgbotapi.NewMessage(
+						update.Message.Chat.ID,
+						"ZX WebApp is live",
+					)
 
-    bot.Send(msg)
+				bot.Send(msg)
 
-   }
+			}
 
-  }
+		}
 
- }()
+	}()
 
- http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 
-  w.Header().Set(
-   "Content-Type",
-   "text/html"
-  )
+		w.Header().Set(
+			"Content-Type",
+			"text/html",
+		)
 
-  w.Write([]byte(webAppHTML))
+		w.Write([]byte(webAppHTML))
 
- })
+	})
 
- port := os.Getenv("PORT")
+	port := os.Getenv("PORT")
 
- if port == "" {
-  port = "8080"
- }
+	if port == "" {
+		port = "8080"
+	}
 
- log.Println("Running on :" + port)
+	log.Println("Running on :" + port)
 
- log.Fatal(
-  http.ListenAndServe(
-   ":" + port,
-   nil,
-  ),
- )
+	log.Fatal(
+		http.ListenAndServe(
+			":"+port,
+			nil,
+		),
+	)
 
 }
