@@ -462,6 +462,16 @@ body::before{
  }
 }
 
+/* ---------- LEADERBOARD STYLES ---------- */
+.leaderboardItem {
+ display:flex;
+ justify-content:space-between;
+ padding:10px 0;
+ border-bottom:1px solid rgba(255,255,255,0.06);
+}
+.leaderboardRank { width:30px; color:var(--green); font-weight:bold; }
+.leaderboardName { flex:1; }
+.leaderboardBalance { color:#fff; }
 </style>
 </head>
 
@@ -980,9 +990,8 @@ body::before{
 
  </h2>
 
- <div id="leaderboard">
-
- </div>
+ <!-- Acest div va fi populat dinamic -->
+ <div id="leaderboard"></div>
 
  <div
   style="
@@ -1224,15 +1233,57 @@ function formatNumber(v){
 
 }
 
-// ---------- UPGRADE COST FUNCTIONS (NEW) ----------
+// ---------- UPGRADE COST FUNCTIONS ----------
 function getTapUpgradeCost() {
-  // cost creste cu nivelul: nivel 0 -> 1000, nivel 1 -> 4000, nivel 2 -> 9000, etc.
   return 1000 * Math.pow(state.tapLevel + 1, 2);
 }
 
 function getEnergyUpgradeCost() {
-  // cost: 2500 * (nivel+1)^2
   return 2500 * Math.pow(state.energyLevel + 1, 2);
+}
+
+// ---------- LEADERBOARD FUNCTIONS (NEW) ----------
+function generateFakePlayers() {
+  // Nume de jucători simulatori
+  const names = ["CryptoKing", "ZXWhale", "BlockchainLord", "TokenMaster", "NebulaHacker",
+                 "StarTrader", "QuantumMiner", "ApexGamer", "PhantomUser", "LuckyStrike"];
+  // Generăm balanțe aleatorii între 100k și 600k
+  let players = names.map(name => ({
+    name: name,
+    balance: Math.floor(Math.random() * 500000) + 100000
+  }));
+
+  // Adăugăm utilizatorul real
+  players.push({ name: "Tu", balance: state.balance, isUser: true });
+
+  // Sortăm descrescător după balanță
+  players.sort((a, b) => b.balance - a.balance);
+  return players;
+}
+
+function updateLeaderboard() {
+  const players = generateFakePlayers();
+  const leaderboardDiv = document.getElementById("leaderboard");
+  if (!leaderboardDiv) return;
+
+  // Goliți conținutul existent
+  leaderboardDiv.innerHTML = "";
+
+  // Adăugăm fiecare jucător
+  players.forEach((player, index) => {
+    const item = document.createElement("div");
+    item.className = "leaderboardItem";
+    item.innerHTML = 
+      `<span class="leaderboardRank">#${index + 1}</span>
+       <span class="leaderboardName" style="${player.isUser ? 'color:#00ff87; font-weight:bold' : ''}">${player.name}</span>
+       <span class="leaderboardBalance">${formatNumber(player.balance)} ZX</span>`;
+    leaderboardDiv.appendChild(item);
+  });
+
+  // Actualizăm poziția utilizatorului
+  const userRank = players.findIndex(p => p.isUser) + 1;
+  document.getElementById("myRank").innerText = "#" + userRank;
+  document.getElementById("myBalance").innerText = formatNumber(state.balance) + " ZX";
 }
 
 // ---------- UPDATE UI (MODIFICAT) ----------
@@ -1302,6 +1353,9 @@ function updateUI(){
  const energyBtn = document.getElementById("buyEnergyUpgrade");
  energyBtn.disabled = state.balance < energyCost;
  energyBtn.innerText = energyBtn.disabled ? "Fonduri insuficiente" : "Upgrade";
+
+ // ---------- LEADERBOARD UPDATE ----------
+ updateLeaderboard();
 }
 
 function gainTap(){
@@ -1533,7 +1587,7 @@ document
 
 });
 
-// ---------- UPGRADE BUTTON EVENTS (NEW) ----------
+// ---------- UPGRADE BUTTON EVENTS ----------
 document.getElementById("buyTapUpgrade").addEventListener("click", () => {
   const cost = getTapUpgradeCost();
   if (state.balance < cost) return;
@@ -1548,14 +1602,13 @@ document.getElementById("buyEnergyUpgrade").addEventListener("click", () => {
   if (state.balance < cost) return;
   state.balance -= cost;
   state.energyLevel += 1;
-  state.maxEnergy += 500; // crește cu 500 capacitatea maximă
-  state.energy = state.maxEnergy; // reîncarcă energia la maxim după upgrade
+  state.maxEnergy += 500;
+  state.energy = state.maxEnergy;
   saveState();
   updateUI();
 });
 
 // INIT
-
 updateUI();
 
 </script>
