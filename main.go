@@ -318,6 +318,11 @@ body::before{
  filter:brightness(1.05);
 }
 
+.btn:disabled{
+ opacity:0.6;
+ cursor:not-allowed;
+}
+
 .upgrades{
  margin-top:22px;
 
@@ -1219,6 +1224,18 @@ function formatNumber(v){
 
 }
 
+// ---------- UPGRADE COST FUNCTIONS (NEW) ----------
+function getTapUpgradeCost() {
+  // cost creste cu nivelul: nivel 0 -> 1000, nivel 1 -> 4000, nivel 2 -> 9000, etc.
+  return 1000 * Math.pow(state.tapLevel + 1, 2);
+}
+
+function getEnergyUpgradeCost() {
+  // cost: 2500 * (nivel+1)^2
+  return 2500 * Math.pow(state.energyLevel + 1, 2);
+}
+
+// ---------- UPDATE UI (MODIFICAT) ----------
 function updateUI(){
 
  document
@@ -1268,6 +1285,23 @@ function updateUI(){
  )
  .style.width =
  percent + "%";
+
+ // ---------- UPGRADE UI UPDATE ----------
+ const tapCost = getTapUpgradeCost();
+ document.getElementById("tapLevel").innerText = "Nivel " + state.tapLevel;
+ document.getElementById("tapCost").innerText = "Cost: " + formatNumber(tapCost) + " ZX";
+
+ const tapBtn = document.getElementById("buyTapUpgrade");
+ tapBtn.disabled = state.balance < tapCost;
+ tapBtn.innerText = tapBtn.disabled ? "Fonduri insuficiente" : "Upgrade";
+
+ const energyCost = getEnergyUpgradeCost();
+ document.getElementById("energyLevel").innerText = "Max " + state.maxEnergy;
+ document.getElementById("energyCost").innerText = "Cost: " + formatNumber(energyCost) + " ZX";
+
+ const energyBtn = document.getElementById("buyEnergyUpgrade");
+ energyBtn.disabled = state.balance < energyCost;
+ energyBtn.innerText = energyBtn.disabled ? "Fonduri insuficiente" : "Upgrade";
 }
 
 function gainTap(){
@@ -1497,6 +1531,27 @@ document
  .getElementById("rechargeModal")
  .style.display = "none";
 
+});
+
+// ---------- UPGRADE BUTTON EVENTS (NEW) ----------
+document.getElementById("buyTapUpgrade").addEventListener("click", () => {
+  const cost = getTapUpgradeCost();
+  if (state.balance < cost) return;
+  state.balance -= cost;
+  state.tapLevel += 1;
+  saveState();
+  updateUI();
+});
+
+document.getElementById("buyEnergyUpgrade").addEventListener("click", () => {
+  const cost = getEnergyUpgradeCost();
+  if (state.balance < cost) return;
+  state.balance -= cost;
+  state.energyLevel += 1;
+  state.maxEnergy += 500; // crește cu 500 capacitatea maximă
+  state.energy = state.maxEnergy; // reîncarcă energia la maxim după upgrade
+  saveState();
+  updateUI();
 });
 
 // INIT
