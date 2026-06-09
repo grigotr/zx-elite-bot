@@ -225,15 +225,6 @@ body::before{
  flex:1;
 }
 
-.energyText{
- display:flex;
- justify-content:space-between;
-
- margin-bottom:8px;
-
- font-size:13px;
-}
-
 .energyBar{
  width:100%;
  height:14px;
@@ -320,22 +311,7 @@ body::before{
 .upgradeTitle{
  font-size:14px;
  font-weight:800;
-}
-
-.upgradeDesc{
- margin-top:6px;
-
- color:var(--muted);
-
- font-size:12px;
- line-height:1.4;
-}
-
-.upgradeMeta{
- margin-top:10px;
-
- font-size:13px;
- color:#d5fff6;
+ margin-bottom:12px;
 }
 
 .bottomNav{
@@ -553,43 +529,24 @@ body::before{
 
  </div>
 
+ <!-- Bara de energie simplificată: doar bara + butonul -->
  <div class="energyRow">
-
   <div class="energyBox">
-
-   <div class="energyText">
-
-    <span>
-      Energie
-    </span>
-
-    <span id="energyText">
-      500 / 500
-    </span>
-
-   </div>
-
    <div class="energyBar">
-
     <div
      id="energyFill"
      class="energyFill">
     </div>
-
    </div>
-
   </div>
-
   <button
    id="rechargeBtn"
    class="btn">
-
    Încarcă
-
   </button>
-
  </div>
 
+ <!-- Upgrade-uri simplificate: doar titlu + buton -->
  <div class="upgrades">
 
 <div class="upgradeCard">
@@ -598,33 +555,11 @@ body::before{
   👆 Multitap Booster
  </div>
 
- <div class="upgradeDesc">
-  Crește câștigul pe fiecare tap cu +1 ZX pentru fiecare nivel cumpărat.
- </div>
-
- <div
-  id="tapLevel"
-  class="upgradeMeta">
-
-  Nivel 0
-
- </div>
-
- <div
-  id="tapCost"
-  class="upgradeMeta">
-
-  Cost: 1000 ZX
-
- </div>
-
  <button
   id="buyTapUpgrade"
   class="btn"
-  style="width:100%;margin-top:12px;">
-
+  style="width:100%;">
   Upgrade
-
  </button>
 
 </div>
@@ -635,33 +570,11 @@ body::before{
   ⚡ Energy Capacity Booster
  </div>
 
- <div class="upgradeDesc">
-  Crește permanent energia maximă la 1000, 1500, 2000 și mai mult.
- </div>
-
- <div
-  id="energyLevel"
-  class="upgradeMeta">
-
-  Max 500
-
- </div>
-
- <div
-  id="energyCost"
-  class="upgradeMeta">
-
-  Cost: 2500 ZX
-
- </div>
-
  <button
   id="buyEnergyUpgrade"
   class="btn"
-  style="width:100%;margin-top:12px;">
-
+  style="width:100%;">
   Upgrade
-
  </button>
 
 </div>
@@ -1269,15 +1182,7 @@ function updateUI(){
  state.balance
  ) + " ZX";
 
- document
- .getElementById(
- "energyText"
- )
- .innerText =
- state.energy +
- " / " +
- state.maxEnergy;
-
+ // Bara de energie (fără text)
  const percent =
  (state.energy /
  state.maxEnergy)
@@ -1290,20 +1195,12 @@ function updateUI(){
  .style.width =
  percent + "%";
 
- // Upgrade display & button states
- const tapCost = getTapUpgradeCost();
- document.getElementById("tapLevel").innerText = "Nivel " + state.tapLevel;
- document.getElementById("tapCost").innerText = "Cost: " + formatNumber(tapCost) + " ZX";
+ // Starea butoanelor de upgrade (disabled / enabled)
  const tapBtn = document.getElementById("buyTapUpgrade");
- tapBtn.disabled = state.balance < tapCost;
- tapBtn.innerText = tapBtn.disabled ? "Fonduri insuficiente" : "Upgrade";
+ tapBtn.disabled = state.balance < getTapUpgradeCost();
 
- const energyCost = getEnergyUpgradeCost();
- document.getElementById("energyLevel").innerText = "Max " + state.maxEnergy;
- document.getElementById("energyCost").innerText = "Cost: " + formatNumber(energyCost) + " ZX";
  const energyBtn = document.getElementById("buyEnergyUpgrade");
- energyBtn.disabled = state.balance < energyCost;
- energyBtn.innerText = energyBtn.disabled ? "Fonduri insuficiente" : "Upgrade";
+ energyBtn.disabled = state.balance < getEnergyUpgradeCost();
 
  // Leaderboard
  updateLeaderboard();
@@ -1535,7 +1432,7 @@ document
 
 });
 
-// ─── UPGRADE BUTTONS (added) ───
+// ─── UPGRADE BUTTONS (logică păstrată) ───
 document.getElementById("buyTapUpgrade").addEventListener("click", () => {
   const cost = getTapUpgradeCost();
   if (state.balance < cost) return;
