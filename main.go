@@ -506,62 +506,60 @@ body::before{
 
  <div class="coinArea">
 
+  <!-- Moneda ZX redesenată cu traiectorii vectoriale, fără text copiabil -->
   <svg
    id="coin"
    class="coin"
    viewBox="0 0 500 500">
 
    <defs>
-
-    <radialGradient
-     id="coinGrad">
-
-      <stop
-       offset="0%"
-       stop-color="#7affd8"/>
-
-      <stop
-       offset="60%"
-       stop-color="#00ff87"/>
-
-      <stop
-       offset="100%"
-       stop-color="#00c96c"/>
-
+    <radialGradient id="coinGrad">
+      <stop offset="0%" stop-color="#7affd8"/>
+      <stop offset="60%" stop-color="#00ff87"/>
+      <stop offset="100%" stop-color="#00c96c"/>
     </radialGradient>
-
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
    </defs>
 
+   <!-- Inel exterior argintiu -->
    <circle
-    cx="250"
-    cy="250"
-    r="220"
-    fill="url(#coinGrad)"
-    stroke="#d8fff4"
-    stroke-width="8"/>
+    cx="250" cy="250" r="220"
+    fill="none" stroke="#b0c4de" stroke-width="10"/>
 
+   <!-- Inel interior auriu -->
    <circle
-    cx="250"
-    cy="250"
-    r="190"
-    fill="none"
-    stroke="rgba(255,255,255,.3)"
-    stroke-width="4"/>
+    cx="250" cy="250" r="200"
+    fill="none" stroke="url(#coinGrad)" stroke-width="6"/>
 
-   <text
-    x="250"
-    y="285"
-    text-anchor="middle"
-    font-size="130"
-    font-weight="900"
-    fill="#ffffff"
-    stroke="#004f3a"
-    stroke-width="8">
+   <!-- Miez întunecat -->
+   <circle
+    cx="250" cy="250" r="180"
+    fill="#05101c" stroke="#00ff87" stroke-width="2"/>
 
-    ZX
+   <!-- Microcip central (spate) -->
+   <rect x="140" y="150" width="220" height="200" rx="10" fill="none" stroke="rgba(0,255,135,0.2)" stroke-width="1.5"/>
+   <path d="M160 160 L160 180 M180 160 L180 180 M200 160 L200 180 M220 160 L220 180 M240 160 L240 180 M260 160 L260 180 M280 160 L280 180 M300 160 L300 180 M320 160 L320 180" stroke="#00ff87" stroke-width="1" opacity="0.4"/>
+   <path d="M160 340 L160 320 M180 340 L180 320 M200 340 L200 320 M220 340 L220 320 M240 340 L240 320 M260 340 L260 320 M280 340 L280 320 M300 340 L300 320 M320 340 L320 320" stroke="#00ff87" stroke-width="1" opacity="0.4"/>
+   <rect x="230" y="230" width="40" height="40" fill="none" stroke="#00ff87" stroke-width="1.5"/>
+   <circle cx="250" cy="250" r="12" fill="#00ff87" opacity="0.3"/>
 
-   </text>
-
+   <!-- Literele Z și X ca grafică vectorială (nu text) -->
+   <g filter="url(#glow)">
+     <!-- Z -->
+     <path d="M 170 180 L 330 180 L 170 320 L 330 320"
+           fill="none" stroke="#ffffff" stroke-width="22"
+           stroke-linecap="round" stroke-linejoin="round"/>
+     <!-- X -->
+     <path d="M 170 180 L 330 320 M 330 180 L 170 320"
+           fill="none" stroke="#ffffff" stroke-width="22"
+           stroke-linecap="round" stroke-linejoin="round"/>
+   </g>
   </svg>
 
   <div class="tapHint">
