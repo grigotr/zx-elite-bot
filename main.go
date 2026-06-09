@@ -318,6 +318,11 @@ body::before{
  filter:brightness(1.05);
 }
 
+.btn:disabled{
+ opacity:0.6;
+ cursor:not-allowed;
+}
+
 .upgrades{
  margin-top:22px;
 
@@ -457,6 +462,30 @@ body::before{
  }
 }
 
+.leaderboardItem {
+ display:flex;
+ justify-content:space-between;
+ padding:10px 0;
+ border-bottom:1px solid rgba(255,255,255,0.06);
+}
+.leaderboardRank { width:30px; color:var(--green); font-weight:bold; }
+.leaderboardName { flex:1; }
+.leaderboardBalance { color:#fff; }
+
+.withdraw-form {
+ display:flex;
+ gap:10px;
+ margin:20px 0;
+}
+.withdraw-input {
+ flex:1;
+ padding:10px;
+ border-radius:12px;
+ border:1px solid rgba(255,255,255,0.1);
+ background:rgba(0,0,0,0.2);
+ color:#fff;
+ font-size:16px;
+}
 </style>
 </head>
 
@@ -850,6 +879,12 @@ body::before{
 
  </div>
 
+ <!-- Withdraw form -->
+ <div class="withdraw-form">
+  <input type="number" id="withdrawAmount" class="withdraw-input" placeholder="Suma ZX" min="1">
+  <button id="withdrawBtn" class="btn" style="width:auto;">Retrage</button>
+ </div>
+
  <h3
   style="
   margin-top:24px;
@@ -913,46 +948,6 @@ body::before{
  </thead>
 
  <tbody id="withdrawTable">
-
-  <tr>
-
-   <td style="padding:12px;">
-    2026-06-01
-   </td>
-
-   <td style="padding:12px;">
-    120000
-   </td>
-
-   <td style="padding:12px;">
-    TON
-   </td>
-
-   <td style="padding:12px;color:#ffd166;">
-    În așteptare
-   </td>
-
-  </tr>
-
-  <tr>
-
-   <td style="padding:12px;">
-    2026-05-24
-   </td>
-
-   <td style="padding:12px;">
-    50000
-   </td>
-
-   <td style="padding:12px;">
-    TON
-   </td>
-
-   <td style="padding:12px;color:#00ff87;">
-    Finalizat
-   </td>
-
-  </tr>
 
  </tbody>
 
@@ -1184,15 +1179,25 @@ body::before{
 
 <script>
 
-const STORAGE_KEY =
-"zx-network-state";
+// ── Telegram user initialization ──
+(function() {
+  if (window.Telegram && window.Telegram.WebApp) {
+    const webApp = window.Telegram.WebApp;
+    webApp.ready();
+    const user = webApp.initDataUnsafe?.user;
+    if (user) {
+      document.getElementById('telegramUser').innerText =
+        user.first_name + (user.last_name ? ' ' + user.last_name : '');
+    }
+  }
+})();
 
-// Load state with full defaults
-let state = JSON.parse(
- localStorage.getItem(STORAGE_KEY) || "{}"
-);
+// ── Game State ──
+const STORAGE_KEY = "zx-network-state";
 
-// Ensure all properties exist to avoid undefined errors
+let state = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+
+// Default values & ensure all new fields exist
 state = {
   balance: state.balance || 0,
   energy: state.energy || 500,
@@ -1202,309 +1207,280 @@ state = {
   rechargeAds: state.rechargeAds || 0,
   walletConnected: state.walletConnected || false,
   walletAddress: state.walletAddress || "",
-  claimedTasks: state.claimedTasks || {}
+  claimedTasks: state.claimedTasks || {},
+  withdrawals: state.withdrawals || []
 };
 
-function saveState(){
-
- localStorage.setItem(
-  STORAGE_KEY,
-  JSON.stringify(state)
- );
-
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-function formatNumber(v){
-
- return Number(v)
- .toLocaleString("ro-RO");
-
+function formatNumber(v) {
+  return Number(v).toLocaleString("ro-RO");
 }
 
-function updateUI(){
+// ── UI update ──
+function updateUI() {
+  // Balances
+  document.getElementById("balanceDisplay").innerText = formatNumber(state.balance);
+  document.getElementById("walletBalance").innerText = formatNumber(state.balance);
+  document.getElementById("myBalance").innerText = formatNumber(state.balance) + " ZX";
 
- document
- .getElementById(
- "balanceDisplay"
- )
- .innerText =
- formatNumber(
- state.balance
- );
+  // Energy
+  document.getElementById("energyText").innerText = state.energy + " / " + state.maxEnergy;
+  const percent = (state.energy / state.maxEnergy) * 100;
+  document.getElementById("energyFill").style.width = percent + "%";
 
- document
- .getElementById(
- "walletBalance"
- )
- .innerText =
- formatNumber(
- state.balance
- );
+  // Upgrade texts
+  document.getElementById("tapLevel").innerText = "Nivel " + state.tapLevel;
+  const tapCost = getTapUpgradeCost();
+  document.getElementById("tapCost").innerText = "Cost: " + formatNumber(tapCost) + " ZX";
+  const tapBtn = document.getElementById("buyTapUpgrade");
+  tapBtn.disabled = state.balance < tapCost;
+  if (tapBtn.disabled) {
+    tapBtn.innerText = "Fonduri insuficiente";
+  } else {
+    tapBtn.innerText = "Upgrade";
+  }
 
- document
- .getElementById(
- "myBalance"
- )
- .innerText =
- formatNumber(
- state.balance
- ) + " ZX";
+  document.getElementById("energyLevel").innerText = "Max " + state.maxEnergy;
+  const energyCost = getEnergyUpgradeCost();
+  document.getElementById("energyCost").innerText = "Cost: " + formatNumber(energyCost) + " ZX";
+  const energyBtn = document.getElementById("buyEnergyUpgrade");
+  energyBtn.disabled = state.balance < energyCost;
+  if (energyBtn.disabled) {
+    energyBtn.innerText = "Fonduri insuficiente";
+  } else {
+    energyBtn.innerText = "Upgrade";
+  }
 
- document
- .getElementById(
- "energyText"
- )
- .innerText =
- state.energy +
- " / " +
- state.maxEnergy;
+  // Leaderboard
+  updateLeaderboard();
 
- const percent =
- (state.energy /
- state.maxEnergy)
- * 100;
-
- document
- .getElementById(
- "energyFill"
- )
- .style.width =
- percent + "%";
-} // <-- ACESTA ESTE ACOLADA CARE LIPSA
-
-function gainTap(){
-
- if(state.energy <= 0) return;
-
- const gain =
-  1 + state.tapLevel;
-
- state.balance += gain;
-
- state.energy -= 1;
-
- spawnFloat(gain);
-
- saveState();
-
- updateUI();
-
+  // Withdraw table
+  renderWithdrawals();
 }
 
-function spawnFloat(value){
-
- const el =
- document.createElement("div");
-
- el.className =
- "floatGain";
-
- el.innerText =
- "+" + value;
-
- el.style.left =
- (window.innerWidth/2) + "px";
-
- el.style.top =
- (window.innerHeight/2) + "px";
-
- document.body.appendChild(el);
-
- setTimeout(() => {
-
-  el.remove();
-
- }, 900);
-
+// ── Upgrade cost formulas ──
+function getTapUpgradeCost() {
+  return 1000 * Math.pow(state.tapLevel + 1, 2);
 }
 
-document
-.getElementById("coin")
-.addEventListener("click",
- gainTap
-);
-
-// TABS
-
-document
-.querySelectorAll(".tabBtn")
-.forEach(btn => {
-
- btn.addEventListener("click", () => {
-
-  document
-  .querySelectorAll(".tabBtn")
-  .forEach(b =>
-   b.classList.remove("active")
-  );
-
-  btn.classList.add("active");
-
-  const tab =
-  btn.dataset.tab;
-
-  document
-  .getElementById("generatorTab")
-  .classList.add("hidden");
-
-  document
-  .getElementById("tasksTab")
-  .classList.add("hidden");
-
-  document
-  .getElementById("walletTab")
-  .classList.add("hidden");
-
-  document
-  .getElementById("rankTab")
-  .classList.add("hidden");
-
-  document
-  .getElementById(tab + "Tab")
-  .classList.remove("hidden");
-
- });
-
-});
-
-// TASKS
-
-function claimTask(id, reward, btn){
-
- if(state.claimedTasks[id]) return;
-
- state.claimedTasks[id] = true;
-
- state.balance += reward;
-
- btn.innerText = "Claimed";
-
- btn.disabled = true;
-
- saveState();
-
- updateUI();
-
+function getEnergyUpgradeCost() {
+  return 2500 * Math.pow(state.energyLevel + 1, 2);
 }
 
-document
-.getElementById("taskTelegram")
-.addEventListener("click",
- function(){
-  claimTask("tg",500,this);
- }
-);
-
-document
-.getElementById("taskPartner")
-.addEventListener("click",
- function(){
-  claimTask("partner",2000,this);
- }
-);
-
-// AD TASK
-
-document
-.getElementById("watchAdBtn")
-.addEventListener("click", () => {
-
- state.balance += 1000;
-
- saveState();
-
- updateUI();
-
-});
-
-// WALLET
-
-document
-.getElementById("connectWallet")
-.addEventListener("click", () => {
-
- state.walletConnected = true;
-
- state.walletAddress =
- "EQB-" +
- Math.random()
- .toString(36)
- .substring(2,12);
-
- document
- .getElementById("walletAddress")
- .style.display =
- "block";
-
- document
- .getElementById("walletAddress")
- .innerText =
- state.walletAddress;
-
- saveState();
-
- updateUI();
-
-});
-
-// RECHARGE ADS
-
-let adCount = 0;
-
-document
-.getElementById("rechargeBtn")
-.addEventListener("click", () => {
-
- document
- .getElementById("rechargeModal")
- .style.display = "flex";
-
- adCount = 0;
-
- document
- .getElementById("adCounter")
- .innerText = "0 / 3";
-
-});
-
-document
-.getElementById("watchRechargeAd")
-.addEventListener("click", () => {
-
- adCount++;
-
- document
- .getElementById("adCounter")
- .innerText =
- adCount + " / 3";
-
- if(adCount >= 3){
-
-  state.energy =
-  state.maxEnergy;
-
+// ── Tap ──
+function gainTap() {
+  if (state.energy <= 0) return;
+  const gain = 1 + state.tapLevel;
+  state.balance += gain;
+  state.energy -= 1;
+  spawnFloat(gain);
   saveState();
-
   updateUI();
+}
 
- }
+function spawnFloat(value) {
+  const el = document.createElement("div");
+  el.className = "floatGain";
+  el.innerText = "+" + value;
+  el.style.left = (window.innerWidth / 2) + "px";
+  el.style.top = (window.innerHeight / 2) + "px";
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 900);
+}
 
+document.getElementById("coin").addEventListener("click", gainTap);
+
+// ── Tabs ──
+document.querySelectorAll(".tabBtn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tabBtn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    const tab = btn.dataset.tab;
+    document.getElementById("generatorTab").classList.add("hidden");
+    document.getElementById("tasksTab").classList.add("hidden");
+    document.getElementById("walletTab").classList.add("hidden");
+    document.getElementById("rankTab").classList.add("hidden");
+    document.getElementById(tab + "Tab").classList.remove("hidden");
+  });
 });
 
-document
-.getElementById("closeRecharge")
-.addEventListener("click", () => {
+// ── Tasks ──
+function claimTask(id, reward, btn) {
+  if (state.claimedTasks[id]) return;
+  state.claimedTasks[id] = true;
+  state.balance += reward;
+  btn.innerText = "Claimed";
+  btn.disabled = true;
+  saveState();
+  updateUI();
+}
 
- document
- .getElementById("rechargeModal")
- .style.display = "none";
-
+// Check if tasks already claimed on load
+document.addEventListener("DOMContentLoaded", () => {
+  if (state.claimedTasks["tg"]) {
+    const btn = document.getElementById("taskTelegram");
+    btn.innerText = "Claimed";
+    btn.disabled = true;
+  }
+  if (state.claimedTasks["partner"]) {
+    const btn = document.getElementById("taskPartner");
+    btn.innerText = "Claimed";
+    btn.disabled = true;
+  }
 });
 
-// INIT
+document.getElementById("taskTelegram").addEventListener("click", function() {
+  claimTask("tg", 500, this);
+});
+document.getElementById("taskPartner").addEventListener("click", function() {
+  claimTask("partner", 2000, this);
+});
 
+document.getElementById("watchAdBtn").addEventListener("click", () => {
+  state.balance += 1000;
+  saveState();
+  updateUI();
+});
+
+// ── Wallet ──
+document.getElementById("connectWallet").addEventListener("click", () => {
+  state.walletConnected = true;
+  state.walletAddress = "EQB-" + Math.random().toString(36).substring(2,12);
+  document.getElementById("walletAddress").style.display = "block";
+  document.getElementById("walletAddress").innerText = state.walletAddress;
+  saveState();
+  updateUI();
+});
+
+// Withdraw
+document.getElementById("withdrawBtn").addEventListener("click", () => {
+  const amountInput = document.getElementById("withdrawAmount");
+  const amount = parseInt(amountInput.value);
+  if (isNaN(amount) || amount <= 0) {
+    alert("Introdu o sumă validă.");
+    return;
+  }
+  if (amount > state.balance) {
+    alert("Sold insuficient.");
+    return;
+  }
+  state.balance -= amount;
+  const now = new Date();
+  const dateStr = now.getFullYear() + "-" +
+    String(now.getMonth()+1).padStart(2,'0') + "-" +
+    String(now.getDate()).padStart(2,'0');
+  state.withdrawals.push({
+    date: dateStr,
+    amount: amount,
+    asset: "TON",
+    status: "Pending"
+  });
+  amountInput.value = "";
+  saveState();
+  updateUI();
+});
+
+function renderWithdrawals() {
+  const tbody = document.getElementById("withdrawTable");
+  tbody.innerHTML = "";
+  if (state.withdrawals.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;color:var(--muted);">Nicio retragere.</td></tr>';
+    return;
+  }
+  state.withdrawals.forEach(w => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td style="padding:12px;">${w.date}</td>
+      <td style="padding:12px;">${formatNumber(w.amount)}</td>
+      <td style="padding:12px;">${w.asset}</td>
+      <td style="padding:12px;color:#ffd166;">${w.status}</td>
+    `;
+    tbody.appendChild(row);
+  });
+}
+
+// ── Recharge ads ──
+let adCount = 0;
+document.getElementById("rechargeBtn").addEventListener("click", () => {
+  document.getElementById("rechargeModal").style.display = "flex";
+  adCount = 0;
+  document.getElementById("adCounter").innerText = "0 / 3";
+});
+document.getElementById("watchRechargeAd").addEventListener("click", () => {
+  adCount++;
+  document.getElementById("adCounter").innerText = adCount + " / 3";
+  if (adCount >= 3) {
+    state.energy = state.maxEnergy;
+    saveState();
+    updateUI();
+  }
+});
+document.getElementById("closeRecharge").addEventListener("click", () => {
+  document.getElementById("rechargeModal").style.display = "none";
+});
+
+// ── Leaderboard ──
+function generateFakePlayers() {
+  const names = ["CryptoKing", "ZXWhale", "BlockchainLord", "TokenMaster", "NebulaHacker",
+                 "StarTrader", "QuantumMiner", "ApexGamer", "PhantomUser", "LuckyStrike"];
+  let players = names.map((name) => ({
+    name,
+    balance: Math.floor(Math.random() * 500000) + 100000
+  }));
+  // Add current user
+  players.push({ name: "Tu", balance: state.balance, isUser: true });
+  // Sort descending
+  players.sort((a, b) => b.balance - a.balance);
+  return players;
+}
+
+function updateLeaderboard() {
+  const players = generateFakePlayers();
+  const leaderboardDiv = document.getElementById("leaderboard");
+  leaderboardDiv.innerHTML = "";
+  players.forEach((p, i) => {
+    const item = document.createElement("div");
+    item.className = "leaderboardItem";
+    item.innerHTML = `
+      <span class="leaderboardRank">#${i+1}</span>
+      <span class="leaderboardName" style="${p.isUser ? 'color:#00ff87; font-weight:bold' : ''}">${p.name}</span>
+      <span class="leaderboardBalance">${formatNumber(p.balance)} ZX</span>
+    `;
+    leaderboardDiv.appendChild(item);
+  });
+
+  // Update user rank
+  const userRank = players.findIndex(p => p.isUser) + 1;
+  document.getElementById("myRank").innerText = "#" + userRank;
+  document.getElementById("myBalance").innerText = formatNumber(state.balance) + " ZX";
+}
+
+// ── UPGRADES ──
+document.getElementById("buyTapUpgrade").addEventListener("click", () => {
+  const cost = getTapUpgradeCost();
+  if (state.balance < cost) return;
+  state.balance -= cost;
+  state.tapLevel += 1;
+  saveState();
+  updateUI();
+});
+
+document.getElementById("buyEnergyUpgrade").addEventListener("click", () => {
+  const cost = getEnergyUpgradeCost();
+  if (state.balance < cost) return;
+  state.balance -= cost;
+  state.energyLevel += 1;
+  state.maxEnergy += 500;
+  state.energy = state.maxEnergy;
+  saveState();
+  updateUI();
+});
+
+// Initial UI
 updateUI();
-
 </script>
 
 </div>
@@ -1514,7 +1490,7 @@ updateUI();
 `
 
 func main() {
-	// Token-ul bot-ului introdus direct (NU este recomandat în producție)
+	// Token-ul bot-ului
 	token := "8744648391:AAHbsnd54wrv686PkLCbtj4ueBm4DqEB4vQ"
 
 	bot, err := tgbotapi.NewBotAPI(token)
@@ -1534,14 +1510,36 @@ func main() {
 			}
 
 			if update.Message.Text == "/start" {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "ZX WebApp is live")
+				// Crează tastatura inline cu buton WebApp
+				webAppURL := os.Getenv("WEBAPP_URL")
+				if webAppURL == "" {
+					webAppURL = "https://your-render-url.onrender.com"
+				}
+
+				keyboard := tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonWebApp(
+							"🎮 Joacă ZX Network",
+							tgbotapi.WebAppInfo{Url: webAppURL},
+						),
+					),
+				)
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID,
+					"🔥 Bun venit la *ZX Network*!\n\n"+
+						"🪙 Minează tokeni ZX prin tap\n"+
+						"⚡ Fă upgrade-uri pentru câștiguri mai mari\n"+
+						"💼 Completează task-uri pentru recompense\n"+
+						"🏆 Urcă în clasament\n\n"+
+						"Apasă butonul de mai jos pentru a începe! ⬇️")
+				msg.ParseMode = "Markdown"
+				msg.ReplyMarkup = keyboard
 				bot.Send(msg)
 			}
 		}
 	}()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(webAppHTML))
 	})
 
@@ -1550,6 +1548,6 @@ func main() {
 		port = "8080"
 	}
 
-	log.Println("Running on :" + port)
+	log.Println("🚀 Bot pornit pe portul " + port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
