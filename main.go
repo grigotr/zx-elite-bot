@@ -668,17 +668,15 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	switch msg.Text {
 	case "/start":
-		// Check for referral deep link: /start ref_ZXXXXXAB
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonWebApp("🎮 Joacă ZX Network", tgbotapi.WebAppInfo{Url: webAppURL}),
+				tgbotapi.NewInlineKeyboardButtonWebApp("🎮 Joacă ZX Network", tgbotapi.WebAppInfo{URL: webAppURL}),
 			),
 		)
 		reply := tgbotapi.NewMessage(msg.Chat.ID,
-			"🧬 Bine ai venit în nucleul *ZX Network*\\!\n\n"+
+			"🧬 Bine ai venit în nucleul ZX Network!\n\n"+
 				"Apasă butonul de mai jos pentru a accesa aplicația și a genera resurse:\n\n"+
 				"⚡ Tap → Earn → Upgrade → Dominate")
-		reply.ParseMode = "MarkdownV2"
 		reply.ReplyMarkup = keyboard
 		bot.Send(reply)
 
