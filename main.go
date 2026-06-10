@@ -1,914 +1,3 @@
-package main
-
-import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"log"
-	"math"
-	"math/rand"
-	"net/http"
-	"os"
-	"sort"
-	"strconv"
-	"sync"
-	"time"
-
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-)
-
-// ═════════════════════════════════════════════════════════════════════════════
-// ██  CONFIG — COMPLETEZI TU ACESTE VALORI  ██
-// ═════════════════════════════════════════════════════════════════════════════
-
-const (
-	// Canalul tău Telegram public (cu @). Bot-ul TREBUIE să fie admin în canal.
-	TG_CHANNEL = "@ZXchatofficial"
-
-	// Block ID din dashboard-ul Adsgram (https://dev.adsgram.ai)
-	ADSGRAM_BLOCK_ID = "34736"
-
-	// URL-ul aplicației tale pe Render (fără slash la final)
-	APP_URL = "https://zx-elite-core.onrender.com"
-
-	// Recompense task-uri (ZX)
-	REWARD_WATCH_AD      int64 = 1000
-	REWARD_JOIN_CHANNEL  int64 = 10000
-	REWARD_JOIN_CHANNEL2 int64 = 1500  // al doilea canal opțional
-	REWARD_TWITTER       int64 = 5000
-	REWARD_PARTNER_BOT   int64 = 20000
-
-	// Link-uri canale / social (le înlocuiești tu)
-	LINK_CHANNEL  = "https://t.me/Swordstarsibot?start=_tgr_6ZeW5DBkNTli"
-	LINK_CHANNEL2 = "https://t.me/CandyAIOfficialbot?start=_tgr_92TSa084ODcy"   // opțional
-	LINK_TWITTER  = "https://t.me/StarsiFotBot?start=_tgr_KvKAi-5hZDQy"
-	LINK_PARTNER  = "https://t.me/wen_Lambo_1212bot?start=_tgr_fBveixRhNzQy"
-
-	// Numele celui de-al doilea canal (opțional, lasă "" dacă nu ai)
-	TG_CHANNEL2 = ""
-)
-
-// ═════════════════════════════════════════════════════════════════════════════
-// DATA STRUCTURES
-// ═════════════════════════════════════════════════════════════════════════════
-
-type PlayerState struct {
-	Username      string       `json:"username"`
-	Balance       int64        `json:"balance"`
-	TapLevel      int          `json:"tapLevel"`
-	EnergyLevel   int          `json:"energyLevel"`
-	LastSync      time.Time    `json:"lastSync"`
-	LastBalance   int64        `json:"lastBalance"`
-	LastCheckin   string       `json:"lastCheckin"`
-	CheckinStreak int          `json:"checkinStreak"`
-	ReferralCode  string       `json:"referralCode"`
-	ReferredBy    string       `json:"referredBy"`
-	Referrals     []string     `json:"referrals"`
-	LastPassive   time.Time    `json:"lastPassive"`
-	PassiveLevel  int          `json:"passiveLevel"`
-	SyncHistory   []SyncRecord `json:"syncHistory"`
-	TelegramID    int64        `json:"telegramId"`
-	ClaimedTasks  []string     `json:"claimedTasks"`
-	WalletAddress string       `json:"walletAddress"`
-}
-
-type SyncRecord struct {
-	T   time.Time `json:"t"`
-	Bal int64     `json:"bal"`
-}
-
-type Database struct {
-	Players map[string]*PlayerState `json:"players"`
-	mu      sync.RWMutex
-}
-
-// ─── API types ───────────────────────────────────────────────────────────────
-
-type SyncRequest struct {
-	Username     string `json:"username"`
-	Balance      int64  `json:"balance"`
-	TapLevel     int    `json:"tapLevel"`
-	EnergyLevel  int    `json:"energyLevel"`
-	PassiveLevel int    `json:"passiveLevel"`
-	TelegramID   int64  `json:"telegramId"`
-}
-
-type SyncResponse struct {
-	Status        string `json:"status"`
-	Balance       int64  `json:"balance"`
-	PassiveEarned int64  `json:"passiveEarned"`
-}
-
-type LeaderboardEntry struct {
-	Username string `json:"username"`
-	Balance  int64  `json:"balance"`
-	Rank     int    `json:"rank"`
-}
-
-type CheckinResponse struct {
-	Success bool   `json:"success"`
-	Reward  int64  `json:"reward"`
-	Streak  int    `json:"streak"`
-	Message string `json:"message"`
-}
-
-type ReferralResponse struct {
-	Code      string   `json:"code"`
-	Referrals []string `json:"referrals"`
-	Earnings  int64    `json:"earnings"`
-}
-
-type ClaimReferralRequest struct {
-	Username     string `json:"username"`
-	ReferralCode string `json:"referralCode"`
-	TelegramID   int64  `json:"telegramId"`
-}
-
-type PassiveResponse struct {
-	Earned  int64 `json:"earned"`
-	PerHour int64 `json:"perHour"`
-	Balance int64 `json:"balance"`
-}
-
-type TaskClaimRequest struct {
-	Username   string `json:"username"`
-	TelegramID int64  `json:"telegramId"`
-	TaskID     string `json:"taskId"`
-}
-
-type TaskClaimResponse struct {
-	Success bool   `json:"success"`
-	Reward  int64  `json:"reward"`
-	Balance int64  `json:"balance"`
-	Message string `json:"message"`
-}
-
-type WalletSaveRequest struct {
-	Username   string `json:"username"`
-	TelegramID int64  `json:"telegramId"`
-	Address    string `json:"address"`
-}
-
-// Adsgram verification response
-type AdsgramVerifyResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// GLOBAL STATE
-// ═════════════════════════════════════════════════════════════════════════════
-
-var (
-	db        *Database
-	dbPath    = "database.json"
-	saveTimer *time.Timer
-	saveMu    sync.Mutex
-	bot       *tgbotapi.BotAPI
-)
-
-// ═════════════════════════════════════════════════════════════════════════════
-// DATABASE
-// ═════════════════════════════════════════════════════════════════════════════
-
-func newDatabase() *Database {
-	return &Database{Players: make(map[string]*PlayerState)}
-}
-
-func loadDatabase() *Database {
-	data, err := os.ReadFile(dbPath)
-	if err != nil {
-		log.Println("📦 Bază de date nouă.")
-		return newDatabase()
-	}
-	d := newDatabase()
-	if err := json.Unmarshal(data, d); err != nil {
-		log.Println("⚠️ DB coruptă, resetare:", err)
-		return newDatabase()
-	}
-	log.Printf("✅ DB încărcată: %d jucători", len(d.Players))
-	return d
-}
-
-func saveDatabase() {
-	db.mu.RLock()
-	data, err := json.MarshalIndent(db, "", "  ")
-	db.mu.RUnlock()
-	if err != nil {
-		return
-	}
-	tmp := dbPath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return
-	}
-	os.Rename(tmp, dbPath)
-}
-
-func scheduleSave() {
-	saveMu.Lock()
-	defer saveMu.Unlock()
-	if saveTimer != nil {
-		saveTimer.Stop()
-	}
-	saveTimer = time.AfterFunc(5*time.Second, saveDatabase)
-}
-
-func startPeriodicSave() {
-	go func() {
-		for range time.NewTicker(60 * time.Second).C {
-			saveDatabase()
-		}
-	}()
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// PLAYER HELPERS
-// ═════════════════════════════════════════════════════════════════════════════
-
-func generateReferralCode() string {
-	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	code := "ZX"
-	for i := 0; i < 6; i++ {
-		code += string(chars[rng.Intn(len(chars))])
-	}
-	return code
-}
-
-func getOrCreatePlayer(username string, telegramID int64) *PlayerState {
-	p, ok := db.Players[username]
-	if !ok {
-		p = &PlayerState{
-			Username:     username,
-			LastSync:     time.Now(),
-			LastPassive:  time.Now(),
-			Referrals:    []string{},
-			SyncHistory:  []SyncRecord{},
-			ClaimedTasks: []string{},
-			TelegramID:   telegramID,
-		}
-		p.ReferralCode = generateReferralCode()
-		db.Players[username] = p
-	}
-	if telegramID != 0 {
-		p.TelegramID = telegramID
-	}
-	return p
-}
-
-func hasClaimedTask(p *PlayerState, taskID string) bool {
-	for _, t := range p.ClaimedTasks {
-		if t == taskID {
-			return true
-		}
-	}
-	return false
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// PASSIVE INCOME
-// ═════════════════════════════════════════════════════════════════════════════
-
-func passivePerHour(lvl int) int64 {
-	if lvl <= 0 {
-		return 0
-	}
-	return int64(math.Round(100 * math.Pow(1.8, float64(lvl-1))))
-}
-
-func computePassiveEarned(p *PlayerState) int64 {
-	pph := passivePerHour(p.PassiveLevel)
-	if pph == 0 {
-		return 0
-	}
-	elapsed := time.Since(p.LastPassive)
-	if elapsed > 8*time.Hour {
-		elapsed = 8 * time.Hour
-	}
-	return int64(elapsed.Hours() * float64(pph))
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// ANTI-CHEAT
-// ═════════════════════════════════════════════════════════════════════════════
-
-func maxLegitimateRate(tapLevel, passiveLevel int) float64 {
-	return float64(1+tapLevel)*20.0 + float64(passivePerHour(passiveLevel))/3600.0 + 50
-}
-
-func validateBalanceIncrease(p *PlayerState, newBalance int64, tapLevel, passiveLevel, energyLevel int) int64 {
-	now := time.Now()
-	p.TapLevel = tapLevel
-	p.EnergyLevel = energyLevel
-	p.PassiveLevel = passiveLevel
-
-	if p.LastBalance == 0 && newBalance <= 10000 {
-		p.Balance = newBalance
-		p.LastBalance = newBalance
-		p.LastSync = now
-		return newBalance
-	}
-	if newBalance <= p.LastBalance {
-		p.Balance = newBalance
-		p.LastBalance = newBalance
-		p.LastSync = now
-		return newBalance
-	}
-
-	elapsed := now.Sub(p.LastSync).Seconds()
-	if elapsed < 0.5 {
-		elapsed = 0.5
-	}
-	maxRate := maxLegitimateRate(tapLevel, passiveLevel)
-	maxAllowed := p.LastBalance + int64(elapsed*maxRate)
-
-	cutoff := now.Add(-30 * time.Second)
-	fresh := p.SyncHistory[:0]
-	for _, rec := range p.SyncHistory {
-		if rec.T.After(cutoff) {
-			fresh = append(fresh, rec)
-		}
-	}
-	p.SyncHistory = fresh
-
-	if len(p.SyncHistory) >= 2 {
-		oldest := p.SyncHistory[0]
-		windowElapsed := now.Sub(oldest.T).Seconds()
-		if windowElapsed > 0 {
-			windowRate := float64(newBalance-oldest.Bal) / windowElapsed
-			if windowRate > maxRate*1.2 {
-				maxAllowed2 := oldest.Bal + int64(windowElapsed*maxRate*1.2)
-				if maxAllowed2 < maxAllowed {
-					maxAllowed = maxAllowed2
-				}
-			}
-		}
-	}
-
-	if newBalance > maxAllowed {
-		newBalance = maxAllowed
-	}
-
-	p.SyncHistory = append(p.SyncHistory, SyncRecord{T: now, Bal: newBalance})
-	if len(p.SyncHistory) > 60 {
-		p.SyncHistory = p.SyncHistory[len(p.SyncHistory)-60:]
-	}
-	p.Balance = newBalance
-	p.LastBalance = newBalance
-	p.LastSync = now
-	return newBalance
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// TELEGRAM CHANNEL MEMBERSHIP CHECK
-// ═════════════════════════════════════════════════════════════════════════════
-
-// checkChannelMember returns true if userID is a member/admin/owner of channel.
-// Requires bot to be admin in the channel.
-func checkChannelMember(channel string, userID int64) bool {
-	if bot == nil || userID == 0 {
-		return false
-	}
-	cfg := tgbotapi.GetChatMemberConfig{
-		ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
-			SuperGroupUsername: channel,
-			UserID:             userID,
-		},
-	}
-	member, err := bot.GetChatMember(cfg)
-	if err != nil {
-		log.Printf("getChatMember error for %s uid=%d: %v", channel, userID, err)
-		return false
-	}
-	status := member.Status
-	return status == "member" || status == "administrator" || status == "creator" || status == "restricted"
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// HTTP HELPERS
-// ═════════════════════════════════════════════════════════════════════════════
-
-func enableCORS(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-}
-
-func jsonResp(w http.ResponseWriter, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// HANDLERS
-// ═════════════════════════════════════════════════════════════════════════════
-
-func handleSync(w http.ResponseWriter, r *http.Request) {
-	enableCORS(w)
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(200)
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
-		return
-	}
-	var req SyncRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
-	if req.Username == "" || req.Username == "guest" {
-		jsonResp(w, SyncResponse{Status: "ignored", Balance: req.Balance})
-		return
-	}
-
-	db.mu.Lock()
-	p := getOrCreatePlayer(req.Username, req.TelegramID)
-	passiveEarned := computePassiveEarned(p)
-	p.LastPassive = time.Now()
-	validated := validateBalanceIncrease(p, req.Balance+passiveEarned, req.TapLevel, req.PassiveLevel, req.EnergyLevel)
-	db.mu.Unlock()
-	scheduleSave()
-
-	jsonResp(w, SyncResponse{Status: "ok", Balance: validated, PassiveEarned: passiveEarned})
-}
-
-func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
-	enableCORS(w)
-	db.mu.RLock()
-	var list []LeaderboardEntry
-	for u, s := range db.Players {
-		if u != "guest" && u != "" {
-			list = append(list, LeaderboardEntry{Username: u, Balance: s.Balance})
-		}
-	}
-	db.mu.RUnlock()
-
-	sort.Slice(list, func(i, j int) bool { return list[i].Balance > list[j].Balance })
-	if len(list) > 10 {
-		list = list[:10]
-	}
-	for i := range list {
-		list[i].Rank = i + 1
-	}
-	jsonResp(w, list)
-}
-
-func handleCheckin(w http.ResponseWriter, r *http.Request) {
-	enableCORS(w)
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
-		return
-	}
-	var req struct {
-		Username   string `json:"username"`
-		TelegramID int64  `json:"telegramId"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" || req.Username == "guest" {
-		http.Error(w, "bad request", 400)
-		return
-	}
-
-	today := time.Now().Format("2006-01-02")
-	db.mu.Lock()
-	p := getOrCreatePlayer(req.Username, req.TelegramID)
-
-	if p.LastCheckin == today {
-		streak := p.CheckinStreak
-		db.mu.Unlock()
-		jsonResp(w, CheckinResponse{Success: false, Message: "Ai deja check-in-ul de azi!", Streak: streak})
-		return
-	}
-
-	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-	if p.LastCheckin == yesterday {
-		p.CheckinStreak++
-	} else {
-		p.CheckinStreak = 1
-	}
-	p.LastCheckin = today
-
-	reward := int64(500 + 100*p.CheckinStreak)
-	if reward > 3000 {
-		reward = 3000
-	}
-	if p.CheckinStreak == 7 {
-		reward += 5000
-	} else if p.CheckinStreak == 30 {
-		reward += 25000
-	}
-	p.Balance += reward
-	p.LastBalance = p.Balance
-	streak := p.CheckinStreak
-	db.mu.Unlock()
-	scheduleSave()
-
-	jsonResp(w, CheckinResponse{Success: true, Reward: reward, Streak: streak,
-		Message: fmt.Sprintf("🎁 Zi %d consecutivă! +%s ZX", streak, formatInt(reward))})
-}
-
-func handleReferral(w http.ResponseWriter, r *http.Request) {
-	enableCORS(w)
-	username := r.URL.Query().Get("username")
-	if username == "" || username == "guest" {
-		http.Error(w, "forbidden", 403)
-		return
-	}
-	var telegramID int64
-	if s := r.URL.Query().Get("telegramId"); s != "" {
-		telegramID, _ = strconv.ParseInt(s, 10, 64)
-	}
-
-	db.mu.Lock()
-	p := getOrCreatePlayer(username, telegramID)
-	code := p.ReferralCode
-	refs := make([]string, len(p.Referrals))
-	copy(refs, p.Referrals)
-	db.mu.Unlock()
-	scheduleSave()
-
-	jsonResp(w, ReferralResponse{Code: code, Referrals: refs, Earnings: int64(len(refs)) * 500})
-}
-
-func handleClaimReferral(w http.ResponseWriter, r *http.Request) {
-	enableCORS(w)
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
-		return
-	}
-	var req ClaimReferralRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" || req.Username == "guest" {
-		http.Error(w, "bad request", 400)
-		return
-	}
-
-	db.mu.Lock()
-	defer db.mu.Unlock()
-
-	var owner *PlayerState
-	for _, p := range db.Players {
-		if p.ReferralCode == req.ReferralCode {
-			owner = p
-			break
-		}
-	}
-	if owner == nil {
-		jsonResp(w, map[string]interface{}{"success": false, "message": "Cod invalid."})
-		return
-	}
-	if owner.Username == req.Username {
-		jsonResp(w, map[string]interface{}{"success": false, "message": "Nu poți folosi propriul cod!"})
-		return
-	}
-
-	newP := getOrCreatePlayer(req.Username, req.TelegramID)
-	if newP.ReferredBy != "" {
-		jsonResp(w, map[string]interface{}{"success": false, "message": "Ai folosit deja un cod."})
-		return
-	}
-	for _, ref := range owner.Referrals {
-		if ref == req.Username {
-			jsonResp(w, map[string]interface{}{"success": false, "message": "Deja înregistrat."})
-			return
-		}
-	}
-
-	newP.ReferredBy = owner.Username
-	newP.Balance += 1000
-	newP.LastBalance = newP.Balance
-	owner.Referrals = append(owner.Referrals, req.Username)
-	owner.Balance += 500
-	owner.LastBalance = owner.Balance
-	scheduleSave()
-
-	jsonResp(w, map[string]interface{}{"success": true, "message": "✅ +1000 ZX pentru tine, +500 ZX pentru invitant!", "reward": 1000})
-}
-
-func handlePassiveInfo(w http.ResponseWriter, r *http.Request) {
-	enableCORS(w)
-	username := r.URL.Query().Get("username")
-	if username == "" || username == "guest" {
-		jsonResp(w, PassiveResponse{})
-		return
-	}
-	db.mu.RLock()
-	p := db.Players[username]
-	db.mu.RUnlock()
-	if p == nil {
-		jsonResp(w, PassiveResponse{})
-		return
-	}
-	jsonResp(w, PassiveResponse{Earned: computePassiveEarned(p), PerHour: passivePerHour(p.PassiveLevel), Balance: p.Balance})
-}
-
-// ─── Task claim with channel verification ────────────────────────────────────
-
-func handleTaskClaim(w http.ResponseWriter, r *http.Request) {
-	enableCORS(w)
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(200)
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
-		return
-	}
-
-	var req TaskClaimRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" || req.Username == "guest" {
-		http.Error(w, "bad request", 400)
-		return
-	}
-
-	var reward int64
-	var msg string
-
-	switch req.TaskID {
-	case "channel1":
-		// Verificare reală membership canal principal
-		if !checkChannelMember(TG_CHANNEL, req.TelegramID) {
-			jsonResp(w, TaskClaimResponse{Success: false, Message: "⚠️ Nu ești abonat la canal! Abonează-te mai întâi."})
-			return
-		}
-		reward = REWARD_JOIN_CHANNEL
-		msg = fmt.Sprintf("✅ Abonat la %s! +%s ZX", TG_CHANNEL, formatInt(reward))
-
-	case "channel2":
-		if TG_CHANNEL2 == "" {
-			jsonResp(w, TaskClaimResponse{Success: false, Message: "Task indisponibil."})
-			return
-		}
-		if !checkChannelMember(TG_CHANNEL2, req.TelegramID) {
-			jsonResp(w, TaskClaimResponse{Success: false, Message: "⚠️ Nu ești abonat! Abonează-te mai întâi."})
-			return
-		}
-		reward = REWARD_JOIN_CHANNEL2
-		msg = fmt.Sprintf("✅ Abonat la %s! +%s ZX", TG_CHANNEL2, formatInt(reward))
-
-	case "twitter":
-		// Twitter nu poate fi verificat server-side, acceptăm pe cuvânt
-		reward = REWARD_TWITTER
-		msg = fmt.Sprintf("✅ Twitter urmărit! +%s ZX", formatInt(reward))
-
-	case "partner":
-		reward = REWARD_PARTNER_BOT
-		msg = fmt.Sprintf("✅ Bot partener activat! +%s ZX", formatInt(reward))
-
-	default:
-		jsonResp(w, TaskClaimResponse{Success: false, Message: "Task necunoscut."})
-		return
-	}
-
-	db.mu.Lock()
-	p := getOrCreatePlayer(req.Username, req.TelegramID)
-	if hasClaimedTask(p, req.TaskID) {
-		bal := p.Balance
-		db.mu.Unlock()
-		jsonResp(w, TaskClaimResponse{Success: false, Message: "Task deja revendicat.", Balance: bal})
-		return
-	}
-	p.ClaimedTasks = append(p.ClaimedTasks, req.TaskID)
-	p.Balance += reward
-	p.LastBalance = p.Balance
-	bal := p.Balance
-	db.mu.Unlock()
-	scheduleSave()
-
-	jsonResp(w, TaskClaimResponse{Success: true, Reward: reward, Balance: bal, Message: msg})
-}
-
-// ─── Adsgram reward verification ─────────────────────────────────────────────
-
-// handleAdsgramReward is called client-side after Adsgram fires onReward callback.
-// We verify the reward is legitimate and add ZX to the player's balance.
-func handleAdsgramReward(w http.ResponseWriter, r *http.Request) {
-	enableCORS(w)
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(200)
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
-		return
-	}
-
-	var req struct {
-		Username   string `json:"username"`
-		TelegramID int64  `json:"telegramId"`
-		BlockID    string `json:"blockId"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" || req.Username == "guest" {
-		http.Error(w, "bad request", 400)
-		return
-	}
-
-	// Validate block ID matches our configured one (prevents spoofing)
-	if req.BlockID != ADSGRAM_BLOCK_ID {
-		jsonResp(w, AdsgramVerifyResponse{Success: false, Message: "Block ID invalid."})
-		return
-	}
-
-	db.mu.Lock()
-	p := getOrCreatePlayer(req.Username, req.TelegramID)
-	p.Balance += REWARD_WATCH_AD
-	p.LastBalance = p.Balance
-	bal := p.Balance
-	db.mu.Unlock()
-	scheduleSave()
-
-	jsonResp(w, map[string]interface{}{
-		"success": true,
-		"reward":  REWARD_WATCH_AD,
-		"balance": bal,
-		"message": fmt.Sprintf("+%s ZX din reclamă!", formatInt(REWARD_WATCH_AD)),
-	})
-}
-
-// ─── TON wallet save ──────────────────────────────────────────────────────────
-
-func handleWalletSave(w http.ResponseWriter, r *http.Request) {
-	enableCORS(w)
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(200)
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
-		return
-	}
-
-	var req WalletSaveRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" || req.Address == "" {
-		http.Error(w, "bad request", 400)
-		return
-	}
-
-	db.mu.Lock()
-	p := getOrCreatePlayer(req.Username, req.TelegramID)
-	p.WalletAddress = req.Address
-	db.mu.Unlock()
-	scheduleSave()
-
-	jsonResp(w, map[string]interface{}{"success": true, "address": req.Address})
-}
-
-// ─── TON Connect manifest ─────────────────────────────────────────────────────
-
-func handleTonManifest(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	manifest := map[string]interface{}{
-		"url":  APP_URL,
-		"name": "ZX Network",
-		"iconUrl": APP_URL + "/icon.png",
-		"termsOfUseUrl":   APP_URL + "/terms",
-		"privacyPolicyUrl": APP_URL + "/privacy",
-	}
-	json.NewEncoder(w).Encode(manifest)
-}
-
-// ─── App config endpoint (frontend reads this) ────────────────────────────────
-
-func handleAppConfig(w http.ResponseWriter, r *http.Request) {
-	enableCORS(w)
-	jsonResp(w, map[string]interface{}{
-		"adsgramBlockId": ADSGRAM_BLOCK_ID,
-		"linkChannel":    LINK_CHANNEL,
-		"linkChannel2":   LINK_CHANNEL2,
-		"linkTwitter":    LINK_TWITTER,
-		"linkPartner":    LINK_PARTNER,
-		"channel2Enabled": TG_CHANNEL2 != "",
-		"rewardChannel":  REWARD_JOIN_CHANNEL,
-		"rewardChannel2": REWARD_JOIN_CHANNEL2,
-		"rewardTwitter":  REWARD_TWITTER,
-		"rewardPartner":  REWARD_PARTNER_BOT,
-		"rewardAd":       REWARD_WATCH_AD,
-		"appUrl":         APP_URL,
-	})
-}
-
-// ─── Telegram webhook ─────────────────────────────────────────────────────────
-
-func handleWebhook(w http.ResponseWriter, r *http.Request) {
-	if bot == nil {
-		http.Error(w, "bot not initialized", 500)
-		return
-	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
-	var update tgbotapi.Update
-	if err := json.Unmarshal(body, &update); err != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
-	if update.Message == nil {
-		return
-	}
-
-	msg := update.Message
-	webAppURL := os.Getenv("WEBAPP_URL")
-	if webAppURL == "" {
-		webAppURL = APP_URL
-	}
-
-	switch msg.Text {
-	case "/start":
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonWebApp("🎮 Joacă ZX Network", tgbotapi.WebAppInfo{URL: webAppURL}),
-			),
-		)
-		reply := tgbotapi.NewMessage(msg.Chat.ID,
-			"🧬 Bine ai venit în nucleul ZX Network!\n\n"+
-				"Apasă butonul de mai jos pentru a accesa aplicația și a genera resurse:\n\n"+
-				"⚡ Tap → Earn → Upgrade → Dominate")
-		reply.ReplyMarkup = keyboard
-		bot.Send(reply)
-
-	case "/referral":
-		u := msg.From
-		username := u.UserName
-		if username == "" {
-			username = fmt.Sprintf("id%d", u.ID)
-		}
-		db.mu.Lock()
-		p := getOrCreatePlayer(username, u.ID)
-		code := p.ReferralCode
-		refCount := len(p.Referrals)
-		db.mu.Unlock()
-		scheduleSave()
-
-		botUser := bot.Self.UserName
-		refLink := fmt.Sprintf("https://t.me/%s?start=ref_%s", botUser, code)
-		text := fmt.Sprintf("🔗 Codul tău: `%s`\n\nLink:\n%s\n\n👥 Invitați: %d\n💰 Câștiguri: %s ZX",
-			code, refLink, refCount, formatInt(int64(refCount)*500))
-		reply := tgbotapi.NewMessage(msg.Chat.ID, text)
-		reply.ParseMode = "Markdown"
-		bot.Send(reply)
-
-	case "/balance":
-		u := msg.From
-		username := u.UserName
-		if username == "" {
-			username = fmt.Sprintf("id%d", u.ID)
-		}
-		db.mu.RLock()
-		p := db.Players[username]
-		db.mu.RUnlock()
-		var bal int64
-		if p != nil {
-			bal = p.Balance
-		}
-		reply := tgbotapi.NewMessage(msg.Chat.ID, fmt.Sprintf("💰 Balanța ta: *%s ZX*", formatInt(bal)))
-		reply.ParseMode = "Markdown"
-		bot.Send(reply)
-
-	case "/leaderboard":
-		db.mu.RLock()
-		var list []LeaderboardEntry
-		for u, s := range db.Players {
-			if u != "guest" {
-				list = append(list, LeaderboardEntry{Username: u, Balance: s.Balance})
-			}
-		}
-		db.mu.RUnlock()
-		sort.Slice(list, func(i, j int) bool { return list[i].Balance > list[j].Balance })
-		if len(list) > 5 {
-			list = list[:5]
-		}
-		text := "🏆 *Top 5 ZX Network*\n\n"
-		medals := []string{"🥇", "🥈", "🥉", "4️⃣", "5️⃣"}
-		for i, e := range list {
-			text += fmt.Sprintf("%s @%s — %s ZX\n", medals[i], e.Username, formatInt(e.Balance))
-		}
-		reply := tgbotapi.NewMessage(msg.Chat.ID, text)
-		reply.ParseMode = "Markdown"
-		bot.Send(reply)
-	}
-}
-
-// ─── Util ─────────────────────────────────────────────────────────────────────
-
-func formatInt(n int64) string {
-	s := fmt.Sprintf("%d", n)
-	result := ""
-	for i, c := range s {
-		if i > 0 && (len(s)-i)%3 == 0 {
-			result += "."
-		}
-		result += string(c)
-	}
-	return result
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// FRONTEND HTML
-// ═════════════════════════════════════════════════════════════════════════════
-
 const webAppHTML = `<!DOCTYPE html>
 <html lang="ro">
 <head>
@@ -921,6 +10,8 @@ const webAppHTML = `<!DOCTYPE html>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <!-- TON Connect UI -->
 <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+<!-- ADSGRAM script – obligatoriu pentru reclame reale -->
+<script src="https://sad.adsgram.ai/js/sad.min.js"></script>
 <style>
 :root{
   --bg:#070b10; --panel:#0d1420; --panel2:#111b2b;
@@ -1025,6 +116,7 @@ body::before{
 .tabBtn{ background:none; border:none; color:#87a39d; padding:8px 4px; border-radius:14px; cursor:pointer; font-weight:800; font-size:10px; transition:.2s; line-height:1.3; -webkit-tap-highlight-color:transparent!important; }
 .tabBtn.active{ color:#04120d; background:linear-gradient(135deg,var(--green),var(--green2)); }
 .hidden{ display:none!important; }
+.verify-btn{ display:none!important; }
 .floatGain{
   position:fixed; color:white; font-weight:900; font-size:22px;
   pointer-events:none; z-index:99999;
@@ -1231,8 +323,10 @@ body::before{
       <div class="taskReward">+<span id="rewardCh1Disp">2.500</span> ZX</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-      <a id="ch1Link" href="#" target="_blank" class="btn btn-sm btn-secondary">Deschide</a>
-      <button id="taskCh1Btn" class="btn btn-sm">Verifică</button>
+      <a id="ch1Link" href="#" target="_blank" class="btn btn-sm btn-secondary"
+         onclick="showVerifyBtn(event,'channel1')">Deschide</a>
+      <button id="taskBtn_channel1" class="btn btn-sm verify-btn"
+              onclick="claimTask('channel1', this)">Verifică</button>
     </div>
   </div>
 
@@ -1244,8 +338,10 @@ body::before{
       <div class="taskReward">+<span id="rewardCh2Disp">1.500</span> ZX</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-      <a id="ch2Link" href="#" target="_blank" class="btn btn-sm btn-secondary">Deschide</a>
-      <button id="taskCh2Btn" class="btn btn-sm">Verifică</button>
+      <a id="ch2Link" href="#" target="_blank" class="btn btn-sm btn-secondary"
+         onclick="showVerifyBtn(event,'channel2')">Deschide</a>
+      <button id="taskBtn_channel2" class="btn btn-sm verify-btn"
+              onclick="claimTask('channel2', this)">Verifică</button>
     </div>
   </div>
 
@@ -1257,8 +353,10 @@ body::before{
       <div class="taskReward">+<span id="rewardTwDisp">750</span> ZX</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-      <a id="twLink" href="#" target="_blank" class="btn btn-sm btn-secondary">Deschide</a>
-      <button id="taskTwBtn" class="btn btn-sm">Revendică</button>
+      <a id="twLink" href="#" target="_blank" class="btn btn-sm btn-secondary"
+         onclick="showVerifyBtn(event,'twitter')">Deschide</a>
+      <button id="taskBtn_twitter" class="btn btn-sm verify-btn"
+              onclick="claimTask('twitter', this)">Revendică</button>
     </div>
   </div>
 
@@ -1270,8 +368,10 @@ body::before{
       <div class="taskReward">+<span id="rewardPartnerDisp">2.000</span> ZX</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-      <a id="partnerLink" href="#" target="_blank" class="btn btn-sm btn-secondary">Deschide</a>
-      <button id="taskPartnerBtn" class="btn btn-sm">Revendică</button>
+      <a id="partnerLink" href="#" target="_blank" class="btn btn-sm btn-secondary"
+         onclick="showVerifyBtn(event,'partner')">Deschide</a>
+      <button id="taskBtn_partner" class="btn btn-sm verify-btn"
+              onclick="claimTask('partner', this)">Revendică</button>
     </div>
   </div>
 </div>
@@ -1318,7 +418,9 @@ body::before{
       <span id="walletStatusTxt">Wallet neconectat</span>
     </div>
     <!-- TON Connect UI injectează butonul aici -->
-    <div id="ton-connect-btn"></div>
+    <div id="ton-connect-btn">
+      <div style="color:var(--muted);font-size:13px;padding:10px;">Se încarcă wallet...</div>
+    </div>
     <div id="tonAddrDisplay" class="ton-addr hidden"></div>
     <div id="tonBalanceRow" class="hidden" style="margin-top:10px;font-size:12px;color:var(--muted)">
       Adresa salvată pentru retrageri viitoare ✅
@@ -1451,9 +553,12 @@ fetch('/api/config').then(function(r){ return r.json(); }).then(function(d){
   initAdsgram();
   // Init TON Connect after config loaded
   initTonConnect();
+  // Restore verify buttons visibility
+  restoreVerifyButtons();
 }).catch(function(){
   initAdsgram();
   initTonConnect();
+  restoreVerifyButtons();
 });
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -1472,7 +577,8 @@ var state = {
   lastCheckin:   raw.lastCheckin   || '',
   referralCode:  raw.referralCode  || '',
   referredByDone: raw.referredByDone || false,
-  walletAddress: raw.walletAddress || ''
+  walletAddress: raw.walletAddress || '',
+  linkClicked:   raw.linkClicked   || {}   // { channel1: true, channel2: true, twitter: true, partner: true }
 };
 
 function save(){ try{ localStorage.setItem(SK, JSON.stringify(state)); }catch(e){} }
@@ -1518,6 +624,7 @@ function updateUI(){
   document.getElementById('streakDisp').textContent = state.checkinStreak;
   updateCheckinGrid();
   restoreTaskButtons();
+  restoreVerifyButtons();
 }
 
 function updateCheckinGrid(){
@@ -1539,11 +646,32 @@ function updateCheckinGrid(){
 }
 
 function restoreTaskButtons(){
-  var tasks = { channel1:'taskCh1Btn', channel2:'taskCh2Btn', twitter:'taskTwBtn', partner:'taskPartnerBtn' };
+  var tasks = { channel1:'taskBtn_channel1', channel2:'taskBtn_channel2', twitter:'taskBtn_twitter', partner:'taskBtn_partner' };
   for(var id in tasks){
     var btn = document.getElementById(tasks[id]);
     if(btn && state.claimedTasks[id]){ btn.textContent='✅ Revendicat'; btn.disabled=true; }
   }
+}
+
+// ─── Verify buttons logic ─────────────────────────────────────────────────────
+function showVerifyBtn(e, taskId){
+  // Let the link open normally, then reveal the claim button
+  var btn = document.getElementById('taskBtn_' + taskId);
+  if(btn){
+    btn.style.display = 'inline-block';
+    state.linkClicked[taskId] = true;
+    save();
+  }
+}
+
+function restoreVerifyButtons(){
+  var tasks = ['channel1','channel2','twitter','partner'];
+  tasks.forEach(function(id){
+    var btn = document.getElementById('taskBtn_'+id);
+    if(btn && state.linkClicked && state.linkClicked[id]){
+      btn.style.display = 'inline-block';
+    }
+  });
 }
 
 // ─── Server sync ──────────────────────────────────────────────────────────────
@@ -1662,7 +790,10 @@ document.getElementById('closeRecharge').addEventListener('click', function(){ d
 // ─── ADSGRAM ──────────────────────────────────────────────────────────────────
 function initAdsgram(){
   if(!cfg.adsgramBlockId || cfg.adsgramBlockId==='your-adsgram-block-id') return;
-  if(typeof window.Adsgram === 'undefined') return;
+  if(typeof window.Adsgram === 'undefined'){
+    console.warn('Adsgram library not loaded');
+    return;
+  }
   window._adsgramController = window.Adsgram.init({ blockId: cfg.adsgramBlockId });
 }
 
@@ -1728,11 +859,6 @@ function claimTask(taskId, btn){
     toast('❌ Eroare conexiune.');
   });
 }
-
-document.getElementById('taskCh1Btn').addEventListener('click', function(){ claimTask('channel1', this); });
-document.getElementById('taskCh2Btn').addEventListener('click', function(){ claimTask('channel2', this); });
-document.getElementById('taskTwBtn').addEventListener('click', function(){ claimTask('twitter', this); });
-document.getElementById('taskPartnerBtn').addEventListener('click', function(){ claimTask('partner', this); });
 
 // ─── Daily check-in ───────────────────────────────────────────────────────────
 document.getElementById('checkinBtn').addEventListener('click', function(){
@@ -1894,49 +1020,3 @@ if(cu.username!=='guest'){
 </script>
 </body>
 </html>`
-
-func main() {
-	db = loadDatabase()
-	startPeriodicSave()
-
-	token := os.Getenv("TELEGRAM_TOKEN")
-	if token != "" {
-		var err error
-		bot, err = tgbotapi.NewBotAPI(token)
-		if err != nil {
-			log.Println("⚠️ Bot error:", err)
-		} else {
-			log.Printf("✅ Bot: @%s", bot.Self.UserName)
-			if wurl := os.Getenv("WEBHOOK_URL"); wurl != "" {
-				if wh, err2 := tgbotapi.NewWebhook(wurl + "/webhook"); err2 == nil {
-					bot.Request(wh)
-					log.Println("✅ Webhook:", wurl+"/webhook")
-				}
-			}
-		}
-	} else {
-		log.Println("⚠️ TELEGRAM_TOKEN lipsă — bot dezactivat.")
-	}
-
-	http.HandleFunc("/api/sync",            handleSync)
-	http.HandleFunc("/api/leaderboard",     handleLeaderboard)
-	http.HandleFunc("/api/checkin",         handleCheckin)
-	http.HandleFunc("/api/referral",        handleReferral)
-	http.HandleFunc("/api/referral/claim",  handleClaimReferral)
-	http.HandleFunc("/api/passive",         handlePassiveInfo)
-	http.HandleFunc("/api/task/claim",      handleTaskClaim)
-	http.HandleFunc("/api/ad-reward",       handleAdsgramReward)
-	http.HandleFunc("/api/wallet/save",     handleWalletSave)
-	http.HandleFunc("/api/config",          handleAppConfig)
-	http.HandleFunc("/tonconnect-manifest.json", handleTonManifest)
-	http.HandleFunc("/webhook",             handleWebhook)
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(webAppHTML))
-	})
-
-	port := os.Getenv("PORT")
-	if port == "" { port = "8080" }
-	log.Printf("🚀 ZX Network pe portul %s | %d jucători", port, len(db.Players))
-	log.Fatal(http.ListenAndServe(":"+port, nil))
-}
