@@ -7,136 +7,131 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-type PlayerUpdate struct {
-	UserID   string `json:"userId"`
-	UserName string `json:"userName"`
+// ─── Structuri pentru API ───
+type SyncRequest struct {
+	Username string `json:"username"`
 	Balance  int    `json:"balance"`
 }
 
-type DeleteRequest struct {
-	UserID string `json:"userId"`
+type LeaderboardEntry struct {
+	Username string `json:"username"`
+	Balance  int    `json:"balance"`
 }
 
-type LeaderboardEntry struct {
-	Name    string `json:"name"`
-	Balance int    `json:"balance"`
-	UserID  string `json:"userId"`
+// ─── Stare server (protejată de mutex) ───
+type PlayerState struct {
+	Balance    int
+	LastSync   time.Time
+	LastBalance int
 }
 
 var (
-	players   = make(map[string]PlayerUpdate)
-	playersMu sync.RWMutex
+	players   = make(map[string]*PlayerState) // username -> state
+	playersMu sync.Mutex
 	bot       *tgbotapi.BotAPI
 )
 
-func loadPlayers() {
-	if data, err := os.ReadFile("players.json"); err == nil {
-		var saved map[string]PlayerUpdate
-		if json.Unmarshal(data, &saved) == nil {
-			playersMu.Lock()
-			for k, v := range saved {
-				players[k] = v
-			}
-			playersMu.Unlock()
-			log.Println("✅ Date încărcate din players.json")
-		}
-	}
-}
-
-func savePlayersToFile() {
-	playersMu.RLock()
-	defer playersMu.RUnlock()
-	data, _ := json.Marshal(players)
-	os.WriteFile("players.json", data, 0644)
-}
-
-func handleUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var update PlayerUpdate
-	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
-		return
-	}
-	if update.UserID == "" || update.UserName == "" {
-		http.Error(w, "Missing fields", http.StatusBadRequest)
-		return
-	}
-
+// Validare anti-cheat: max 100 puncte pe secundă
+func validateBalanceIncrease(user string, newBalance int) int {
 	playersMu.Lock()
-	players[update.UserID] = PlayerUpdate{
-		UserID:   update.UserID,
-		UserName: update.UserName,
-		Balance:  update.Balance,
+	defer playersMu.Unlock()
+
+	state, exists := players[user]
+	now := time.Now()
+
+	if !exists {
+		// prima sincronizare – acceptă soldul trimis
+		players[user] = &PlayerState{
+			Balance:    newBalance,
+			LastSync:   now,
+			LastBalance: newBalance,
+		}
+		return newBalance
 	}
-	playersMu.Unlock()
 
-	savePlayersToFile()
+	elapsed := now.Sub(state.LastSync).Seconds()
+	maxIncrease := int(elapsed * 100) // 100 puncte / secundă
 
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("ok"))
+	// Dacă soldul scade (cheltuieli), permitem orice scădere
+	if newBalance <= state.LastBalance {
+		state.Balance = newBalance
+		state.LastBalance = newBalance
+		state.LastSync = now
+		return newBalance
+	}
+
+	increase := newBalance - state.LastBalance
+	if increase > maxIncrease {
+		// Limitează creșterea la maximul permis
+		state.Balance = state.LastBalance + maxIncrease
+	} else {
+		state.Balance = newBalance
+	}
+
+	state.LastBalance = state.Balance
+	state.LastSync = now
+	return state.Balance
 }
 
-func handleDelete(w http.ResponseWriter, r *http.Request) {
+// ─── Handlere API ───
+func handleSync(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	var req DeleteRequest
+	var req SyncRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
-	if req.UserID == "" {
-		http.Error(w, "Missing userId", http.StatusBadRequest)
+	if req.Username == "" {
+		http.Error(w, "Missing username", http.StatusBadRequest)
 		return
 	}
 
-	playersMu.Lock()
-	delete(players, req.UserID)
-	playersMu.Unlock()
+	// Validează și actualizează soldul
+	validBalance := validateBalanceIncrease(req.Username, req.Balance)
 
-	savePlayersToFile()
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("deleted"))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "ok",
+		"balance": validBalance,
+	})
 }
 
 func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
-	playersMu.RLock()
-	defer playersMu.RUnlock()
+	playersMu.Lock()
+	defer playersMu.Unlock()
 
-	var list []PlayerUpdate
-	for _, p := range players {
-		list = append(list, p)
+	// Construiește slice din map
+	var list []LeaderboardEntry
+	for user, state := range players {
+		list = append(list, LeaderboardEntry{
+			Username: user,
+			Balance:  state.Balance,
+		})
 	}
 
+	// Sortează descrescător după sold
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].Balance > list[j].Balance
 	})
 
-	var entries []LeaderboardEntry
-	for _, p := range list {
-		entries = append(entries, LeaderboardEntry{
-			Name:    p.UserName,
-			Balance: p.Balance,
-			UserID:  p.UserID,
-		})
-	}
-	if entries == nil {
-		entries = []LeaderboardEntry{}
+	// Limitează la top 10
+	if len(list) > 10 {
+		list = list[:10]
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entries)
+	json.NewEncoder(w).Encode(list)
 }
 
+// ─── Webhook pentru bot (doar răspuns la /start cu buton WebApp) ───
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if bot == nil {
 		http.Error(w, "Bot not initialized", http.StatusInternalServerError)
@@ -150,11 +145,9 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if update.Message != nil && update.Message.Text == "/start" {
-		// Construim un buton WebApp inline
 		webAppURL := os.Getenv("WEBAPP_URL")
 		if webAppURL == "" {
-			// Fallback – trebuie să înlocuiești cu adresa ta reală de Render
-			webAppURL = "https://numele-aplicatiei-tale.onrender.com"
+			webAppURL = "https://your-app.onrender.com" // înlocuiește cu adresa ta reală
 		}
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
@@ -167,6 +160,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ─── HTML/JS (aplicația web) ───
 const webAppHTML = `
 <!DOCTYPE html>
 <html lang="ro">
@@ -174,6 +168,7 @@ const webAppHTML = `
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
 <title>ZX Network</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{
  --bg:#070b10;
@@ -506,35 +501,22 @@ body::before{
 </div>
 
 <script>
-var currentUser = { id: 'guest', name: 'Guest' };
+// ─── Inițializare Telegram ───
+var tg = window.Telegram ? window.Telegram.WebApp : null;
+var currentUser = { username: 'guest', firstName: 'Guest' };
 
-(function() {
-  if (window.Telegram && window.Telegram.WebApp) {
-    var tg = window.Telegram.WebApp;
-    tg.ready();
-    var userData = tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
-    if (userData && userData.id) {
-      currentUser.id = String(userData.id);
-      currentUser.name = userData.first_name || 'Player';
-      if (userData.last_name) {
-        currentUser.name += ' ' + userData.last_name;
-      }
-    }
+if (tg) {
+  tg.ready();
+  var user = tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
+  if (user) {
+    currentUser.username = user.username || ('user' + user.id);
+    currentUser.firstName = user.first_name || 'Player';
   }
+}
 
-  document.getElementById('telegramUser').innerText = currentUser.name;
+document.getElementById('telegramUser').innerText = currentUser.firstName;
 
-  // Depanare doar dacă numele a rămas Guest
-  if (currentUser.name === 'Guest') {
-    setTimeout(function() {
-      alert('⚠️ Nu s-a putut prelua numele.\n\n' +
-            'Telegram.WebApp: ' + (window.Telegram && window.Telegram.WebApp ? 'disponibil' : 'lipsă') + '\n' +
-            'Probabil nu ai deschis aplicația prin butonul WebApp.\n' +
-            'Asigură-te că apeși pe butonul "🎮 Joacă ZX Network" din chat-ul botului.');
-    }, 500);
-  }
-})();
-
+// ─── Stare locală (localStorage) ───
 var STORAGE_KEY = 'zx-network-state';
 var state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
 state = {
@@ -556,36 +538,29 @@ function formatNumber(v) {
   return Number(v).toLocaleString('ro-RO');
 }
 
+// ─── Sincronizare cu serverul (anti-cheat) ───
 function syncWithServer() {
-  if (currentUser.id === 'guest') return;
-  fetch('/api/update', {
+  if (currentUser.username === 'guest') return;
+  fetch('/api/sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      userId: currentUser.id,
-      userName: currentUser.name,
+      username: currentUser.username,
       balance: state.balance
     })
-  }).catch(function(e) { console.error(e); });
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.balance !== undefined && data.balance !== state.balance) {
+      state.balance = data.balance;
+      saveState();
+      updateUI();
+    }
+  })
+  .catch(function(e) { console.error(e); });
 }
 
-async function deleteAccount() {
-  if (!confirm('Ești sigur că vrei să ștergi contul? Toate datele tale vor fi pierdute permanent.')) return;
-  if (currentUser.id !== 'guest') {
-    try {
-      await fetch('/api/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id })
-      });
-    } catch(e) { console.error(e); }
-  }
-  localStorage.removeItem(STORAGE_KEY);
-  location.reload();
-}
-
-document.getElementById('deleteAccountBtn').addEventListener('click', deleteAccount);
-
+// ─── Leaderboard (real de la server) ───
 async function fetchLeaderboard() {
   try {
     var resp = await fetch('/api/leaderboard');
@@ -605,12 +580,12 @@ async function updateLeaderboardUI() {
   var userRank = '-';
   for (var i = 0; i < entries.length; i++) {
     var entry = entries[i];
-    var isMe = (entry.userId === currentUser.id);
+    var isMe = (entry.username === currentUser.username);
     var div = document.createElement('div');
     div.className = 'leaderboardItem';
     div.innerHTML =
       '<span class="leaderboardRank">#' + (i + 1) + '</span>' +
-      '<span class="leaderboardName" style="' + (isMe ? 'color:#00ff87; font-weight:bold' : '') + '">' + entry.name + '</span>' +
+      '<span class="leaderboardName" style="' + (isMe ? 'color:#00ff87; font-weight:bold' : '') + '">' + entry.username + '</span>' +
       '<span class="leaderboardBalance">' + formatNumber(entry.balance) + ' ZX</span>';
     board.appendChild(div);
     if (isMe) userRank = '#' + (i + 1);
@@ -619,14 +594,7 @@ async function updateLeaderboardUI() {
   document.getElementById('myBalance').innerText = formatNumber(state.balance) + ' ZX';
 }
 
-function getTapUpgradeCost() {
-  return 1000 * Math.pow(state.tapLevel + 1, 2);
-}
-
-function getEnergyUpgradeCost() {
-  return 2500 * Math.pow(state.energyLevel + 1, 2);
-}
-
+// ─── UI update local ───
 function updateUI() {
   document.getElementById('balanceDisplay').innerText = formatNumber(state.balance);
   document.getElementById('walletBalance').innerText = formatNumber(state.balance);
@@ -638,13 +606,17 @@ function updateUI() {
   energyBtn.disabled = state.balance < getEnergyUpgradeCost();
 }
 
+// ─── Upgrade costs ───
+function getTapUpgradeCost() { return 1000 * Math.pow(state.tapLevel + 1, 2); }
+function getEnergyUpgradeCost() { return 2500 * Math.pow(state.energyLevel + 1, 2); }
+
+// ─── Game actions ───
 function gainTap(event) {
   if (state.energy <= 0) return;
   var gain = 1 + state.tapLevel;
   state.balance += gain;
   state.energy -= 1;
-  var x = event.clientX;
-  var y = event.clientY;
+  var x = event.clientX, y = event.clientY;
   spawnFloat(gain, x, y);
   saveState();
   updateUI();
@@ -663,6 +635,7 @@ function spawnFloat(value, posX, posY) {
 
 document.getElementById('coin').addEventListener('click', gainTap);
 
+// Tabs
 document.querySelectorAll('.tabBtn').forEach(function(btn) {
   btn.addEventListener('click', function() {
     document.querySelectorAll('.tabBtn').forEach(function(b) { b.classList.remove('active'); });
@@ -673,12 +646,11 @@ document.querySelectorAll('.tabBtn').forEach(function(btn) {
     document.getElementById('walletTab').classList.add('hidden');
     document.getElementById('rankTab').classList.add('hidden');
     document.getElementById(tab + 'Tab').classList.remove('hidden');
-    if (tab === 'rank') {
-      updateLeaderboardUI();
-    }
+    if (tab === 'rank') updateLeaderboardUI();
   });
 });
 
+// Tasks
 function claimTask(id, reward, btn) {
   if (state.claimedTasks[id]) return;
   state.claimedTasks[id] = true;
@@ -689,7 +661,6 @@ function claimTask(id, reward, btn) {
   updateUI();
   syncWithServer();
 }
-
 document.getElementById('taskTelegram').addEventListener('click', function() { claimTask('tg', 500, this); });
 document.getElementById('taskPartner').addEventListener('click', function() { claimTask('partner', 2000, this); });
 document.getElementById('watchAdBtn').addEventListener('click', function() {
@@ -699,9 +670,10 @@ document.getElementById('watchAdBtn').addEventListener('click', function() {
   syncWithServer();
 });
 
+// Wallet
 document.getElementById('connectWallet').addEventListener('click', function() {
   state.walletConnected = true;
-  state.walletAddress = 'EQB-' + Math.random().toString(36).substring(2, 12);
+  state.walletAddress = 'EQB-' + Math.random().toString(36).substring(2,12);
   document.getElementById('walletAddress').style.display = 'block';
   document.getElementById('walletAddress').innerText = state.walletAddress;
   saveState();
@@ -709,6 +681,15 @@ document.getElementById('connectWallet').addEventListener('click', function() {
   syncWithServer();
 });
 
+// Delete account
+async function deleteAccount() {
+  if (!confirm('Ești sigur că vrei să ștergi contul?')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  location.reload();
+}
+document.getElementById('deleteAccountBtn').addEventListener('click', deleteAccount);
+
+// Recharge
 var adCount = 0;
 document.getElementById('rechargeBtn').addEventListener('click', function() {
   document.getElementById('rechargeModal').style.display = 'flex';
@@ -729,6 +710,7 @@ document.getElementById('closeRecharge').addEventListener('click', function() {
   document.getElementById('rechargeModal').style.display = 'none';
 });
 
+// Upgrades
 document.getElementById('buyTapUpgrade').addEventListener('click', function() {
   var cost = getTapUpgradeCost();
   if (state.balance < cost) return;
@@ -738,7 +720,6 @@ document.getElementById('buyTapUpgrade').addEventListener('click', function() {
   updateUI();
   syncWithServer();
 });
-
 document.getElementById('buyEnergyUpgrade').addEventListener('click', function() {
   var cost = getEnergyUpgradeCost();
   if (state.balance < cost) return;
@@ -766,13 +747,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	loadPlayers()
-
-	http.HandleFunc("/api/update", handleUpdate)
-	http.HandleFunc("/api/delete", handleDelete)
+	// Endpoint-uri API
+	http.HandleFunc("/api/sync", handleSync)
 	http.HandleFunc("/api/leaderboard", handleLeaderboard)
 	http.HandleFunc("/webhook", handleWebhook)
 
+	// Servește aplicația web
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(webAppHTML))
