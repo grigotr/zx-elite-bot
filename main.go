@@ -22,30 +22,27 @@ import (
 // ═════════════════════════════════════════════════════════════════════════════
 
 const (
-	// Canalul tău Telegram public (cu @). Bot-ul TREBUIE să fie admin în canal.
-	TG_CHANNEL = "@ZXchatofficial"
-
-	// Block ID din dashboard-ul Adsgram (https://dev.adsgram.ai)
+	TG_CHANNEL       = "@ZXchatofficial"
 	ADSGRAM_BLOCK_ID = "34749"
+	APP_URL          = "https://zx-elite-core.onrender.com"
 
-	// URL-ul aplicației tale pe Render (fără slash la final)
-	APP_URL = "https://zx-elite-core.onrender.com"
-
-	// Recompense task-uri (ZX)
 	REWARD_WATCH_AD      int64 = 1000
 	REWARD_JOIN_CHANNEL  int64 = 10000
-	REWARD_JOIN_CHANNEL2 int64 = 1500  // al doilea canal opțional
+	REWARD_JOIN_CHANNEL2 int64 = 1500
 	REWARD_TWITTER       int64 = 5000
 	REWARD_PARTNER_BOT   int64 = 20000
 
-	// Link-uri canale / social (le înlocuiești tu)
 	LINK_CHANNEL  = "https://t.me/Swordstarsibot?start=_tgr_6ZeW5DBkNTli"
-	LINK_CHANNEL2 = "https://t.me/CandyAIOfficialbot?start=_tgr_92TSa084ODcy"   // opțional
+	LINK_CHANNEL2 = "https://t.me/CandyAIOfficialbot?start=_tgr_92TSa084ODcy"
 	LINK_TWITTER  = "https://t.me/StarsiFotBot?start=_tgr_KvKAi-5hZDQy"
 	LINK_PARTNER  = "https://t.me/wen_Lambo_1212bot?start=_tgr_fBveixRhNzQy"
 
-	// Numele celui de-al doilea canal (opțional, lasă "" dacă nu ai)
 	TG_CHANNEL2 = ""
+
+	// Level caps
+	MAX_TAP_LEVEL     = 20
+	MAX_ENERGY_LEVEL  = 20
+	MAX_PASSIVE_LEVEL = 20
 )
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -54,6 +51,7 @@ const (
 
 type PlayerState struct {
 	Username      string       `json:"username"`
+	FirstName     string       `json:"firstName"`
 	Balance       int64        `json:"balance"`
 	TapLevel      int          `json:"tapLevel"`
 	EnergyLevel   int          `json:"energyLevel"`
@@ -70,7 +68,7 @@ type PlayerState struct {
 	TelegramID    int64        `json:"telegramId"`
 	ClaimedTasks  []string     `json:"claimedTasks"`
 	WalletAddress string       `json:"walletAddress"`
-	LastAdWatch   time.Time    `json:"lastAdWatch"`
+	// No LastAdWatch — cooldown removed
 }
 
 type SyncRecord struct {
@@ -83,10 +81,9 @@ type Database struct {
 	mu      sync.RWMutex
 }
 
-// ─── API types ───────────────────────────────────────────────────────────────
-
 type SyncRequest struct {
 	Username     string `json:"username"`
+	FirstName    string `json:"firstName"`
 	Balance      int64  `json:"balance"`
 	TapLevel     int    `json:"tapLevel"`
 	EnergyLevel  int    `json:"energyLevel"`
@@ -101,9 +98,10 @@ type SyncResponse struct {
 }
 
 type LeaderboardEntry struct {
-	Username string `json:"username"`
-	Balance  int64  `json:"balance"`
-	Rank     int    `json:"rank"`
+	Username  string `json:"username"`
+	FirstName string `json:"firstName"`
+	Balance   int64  `json:"balance"`
+	Rank      int    `json:"rank"`
 }
 
 type CheckinResponse struct {
@@ -150,7 +148,6 @@ type WalletSaveRequest struct {
 	Address    string `json:"address"`
 }
 
-// Adsgram verification response
 type AdsgramVerifyResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
@@ -274,6 +271,9 @@ func passivePerHour(lvl int) int64 {
 	if lvl <= 0 {
 		return 0
 	}
+	if lvl > MAX_PASSIVE_LEVEL {
+		lvl = MAX_PASSIVE_LEVEL
+	}
 	return int64(math.Round(100 * math.Pow(1.8, float64(lvl-1))))
 }
 
@@ -294,16 +294,31 @@ func computePassiveEarned(p *PlayerState) int64 {
 // ═════════════════════════════════════════════════════════════════════════════
 
 func maxLegitimateRate(tapLevel, passiveLevel int) float64 {
-	return float64(1+tapLevel)*20.0 + float64(passivePerHour(passiveLevel))/3600.0 + 50
+	// tap gain = 1 + tapLevel, max 25 taps/s
+	tapGain := float64(1+tapLevel) * 25.0
+	passive := float64(passivePerHour(passiveLevel)) / 3600.0
+	return tapGain + passive + 50
 }
 
 func validateBalanceIncrease(p *PlayerState, newBalance int64, tapLevel, passiveLevel, energyLevel int) int64 {
 	now := time.Now()
+
+	// Clamp levels to max
+	if tapLevel > MAX_TAP_LEVEL {
+		tapLevel = MAX_TAP_LEVEL
+	}
+	if passiveLevel > MAX_PASSIVE_LEVEL {
+		passiveLevel = MAX_PASSIVE_LEVEL
+	}
+	if energyLevel > MAX_ENERGY_LEVEL {
+		energyLevel = MAX_ENERGY_LEVEL
+	}
+
 	p.TapLevel = tapLevel
 	p.EnergyLevel = energyLevel
 	p.PassiveLevel = passiveLevel
 
-	if p.LastBalance == 0 && newBalance <= 10000 {
+	if p.LastBalance == 0 && newBalance <= 50000 {
 		p.Balance = newBalance
 		p.LastBalance = newBalance
 		p.LastSync = now
@@ -424,6 +439,9 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 
 	db.mu.Lock()
 	p := getOrCreatePlayer(req.Username, req.TelegramID)
+	if req.FirstName != "" {
+		p.FirstName = req.FirstName
+	}
 	passiveEarned := computePassiveEarned(p)
 	p.LastPassive = time.Now()
 	validated := validateBalanceIncrease(p, req.Balance+passiveEarned, req.TapLevel, req.PassiveLevel, req.EnergyLevel)
@@ -439,7 +457,11 @@ func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	var list []LeaderboardEntry
 	for u, s := range db.Players {
 		if u != "guest" && u != "" {
-			list = append(list, LeaderboardEntry{Username: u, Balance: s.Balance})
+			name := s.FirstName
+			if name == "" {
+				name = u
+			}
+			list = append(list, LeaderboardEntry{Username: u, FirstName: name, Balance: s.Balance})
 		}
 	}
 	db.mu.RUnlock()
@@ -601,8 +623,6 @@ func handlePassiveInfo(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, PassiveResponse{Earned: computePassiveEarned(p), PerHour: passivePerHour(p.PassiveLevel), Balance: p.Balance})
 }
 
-// ─── Task claim with channel verification ────────────────────────────────────
-
 func handleTaskClaim(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
 	if r.Method == http.MethodOptions {
@@ -630,7 +650,7 @@ func handleTaskClaim(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reward = REWARD_JOIN_CHANNEL
-		msg = fmt.Sprintf("✅ Abonat la %s! +%s ZX", TG_CHANNEL, formatInt(reward))
+		msg = fmt.Sprintf("✅ Abonat! +%s ZX", formatInt(reward))
 
 	case "channel2":
 		if TG_CHANNEL2 == "" {
@@ -642,15 +662,15 @@ func handleTaskClaim(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reward = REWARD_JOIN_CHANNEL2
-		msg = fmt.Sprintf("✅ Abonat la %s! +%s ZX", TG_CHANNEL2, formatInt(reward))
+		msg = fmt.Sprintf("✅ Abonat! +%s ZX", formatInt(reward))
 
 	case "twitter":
 		reward = REWARD_TWITTER
-		msg = fmt.Sprintf("✅ Twitter urmărit! +%s ZX", formatInt(reward))
+		msg = fmt.Sprintf("✅ Urmărit! +%s ZX", formatInt(reward))
 
 	case "partner":
 		reward = REWARD_PARTNER_BOT
-		msg = fmt.Sprintf("✅ Bot partener activat! +%s ZX", formatInt(reward))
+		msg = fmt.Sprintf("✅ Activat! +%s ZX", formatInt(reward))
 
 	default:
 		jsonResp(w, TaskClaimResponse{Success: false, Message: "Task necunoscut."})
@@ -675,8 +695,7 @@ func handleTaskClaim(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, TaskClaimResponse{Success: true, Reward: reward, Balance: bal, Message: msg})
 }
 
-// ─── Adsgram reward verification with 5-minute cooldown ─────────────────────
-
+// Adsgram reward — NO cooldown (removed per request)
 func handleAdsgramReward(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
 	if r.Method == http.MethodOptions {
@@ -705,36 +724,19 @@ func handleAdsgramReward(w http.ResponseWriter, r *http.Request) {
 
 	db.mu.Lock()
 	p := getOrCreatePlayer(req.Username, req.TelegramID)
-
-	// ⏱️ Verificare cooldown 5 minute
-	remainingDuration := 5*time.Minute - time.Since(p.LastAdWatch)
-	if remainingDuration > 0 {
-		remainingSeconds := int(remainingDuration.Seconds())
-		db.mu.Unlock()
-		jsonResp(w, map[string]interface{}{
-			"success":  false,
-			"message":  fmt.Sprintf("⏳ Reclama disponibilă în %d secunde.", remainingSeconds),
-			"cooldown": remainingSeconds,
-		})
-		return
-	}
-
-	p.LastAdWatch = time.Now()
 	p.Balance += REWARD_WATCH_AD
 	p.LastBalance = p.Balance
+	bal := p.Balance
 	db.mu.Unlock()
 	scheduleSave()
 
 	jsonResp(w, map[string]interface{}{
-		"success":  true,
-		"reward":   REWARD_WATCH_AD,
-		"balance":  p.Balance,
-		"message":  fmt.Sprintf("+%s ZX din reclamă!", formatInt(REWARD_WATCH_AD)),
-		"cooldown": 300, // 5 minute
+		"success": true,
+		"reward":  REWARD_WATCH_AD,
+		"balance": bal,
+		"message": fmt.Sprintf("+%s ZX din reclamă!", formatInt(REWARD_WATCH_AD)),
 	})
 }
-
-// ─── TON wallet save ──────────────────────────────────────────────────────────
 
 func handleWalletSave(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
@@ -762,22 +764,17 @@ func handleWalletSave(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, map[string]interface{}{"success": true, "address": req.Address})
 }
 
-// ─── TON Connect manifest ─────────────────────────────────────────────────────
-
 func handleTonManifest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	manifest := map[string]interface{}{
-		"url":               APP_URL,
-		"name":              "ZX Network",
-		"iconUrl":           APP_URL + "/icon.png",
-		"termsOfUseUrl":     APP_URL + "/terms",
-		"privacyPolicyUrl":  APP_URL + "/privacy",
-	}
-	json.NewEncoder(w).Encode(manifest)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"url":              APP_URL,
+		"name":             "ZX Network",
+		"iconUrl":          APP_URL + "/icon.png",
+		"termsOfUseUrl":    APP_URL + "/terms",
+		"privacyPolicyUrl": APP_URL + "/privacy",
+	})
 }
-
-// ─── App config endpoint ──────────────────────────────────────────────────────
 
 func handleAppConfig(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
@@ -794,10 +791,39 @@ func handleAppConfig(w http.ResponseWriter, r *http.Request) {
 		"rewardPartner":   REWARD_PARTNER_BOT,
 		"rewardAd":        REWARD_WATCH_AD,
 		"appUrl":          APP_URL,
+		"maxTapLevel":     MAX_TAP_LEVEL,
+		"maxEnergyLevel":  MAX_ENERGY_LEVEL,
+		"maxPassiveLevel": MAX_PASSIVE_LEVEL,
 	})
 }
 
-// ─── Telegram webhook ─────────────────────────────────────────────────────────
+// handleDeleteAccount removes the player's server-side data
+func handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(200)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	var req struct {
+		Username   string `json:"username"`
+		TelegramID int64  `json:"telegramId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" || req.Username == "guest" {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	db.mu.Lock()
+	delete(db.Players, req.Username)
+	db.mu.Unlock()
+	scheduleSave()
+
+	jsonResp(w, map[string]interface{}{"success": true})
+}
 
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if bot == nil {
@@ -881,7 +907,11 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 		var list []LeaderboardEntry
 		for u, s := range db.Players {
 			if u != "guest" {
-				list = append(list, LeaderboardEntry{Username: u, Balance: s.Balance})
+				name := s.FirstName
+				if name == "" {
+					name = u
+				}
+				list = append(list, LeaderboardEntry{Username: u, FirstName: name, Balance: s.Balance})
 			}
 		}
 		db.mu.RUnlock()
@@ -892,15 +922,13 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 		text := "🏆 *Top 5 ZX Network*\n\n"
 		medals := []string{"🥇", "🥈", "🥉", "4️⃣", "5️⃣"}
 		for i, e := range list {
-			text += fmt.Sprintf("%s @%s — %s ZX\n", medals[i], e.Username, formatInt(e.Balance))
+			text += fmt.Sprintf("%s %s — %s ZX\n", medals[i], e.FirstName, formatInt(e.Balance))
 		}
 		reply := tgbotapi.NewMessage(msg.Chat.ID, text)
 		reply.ParseMode = "Markdown"
 		bot.Send(reply)
 	}
 }
-
-// ─── Util ─────────────────────────────────────────────────────────────────────
 
 func formatInt(n int64) string {
 	s := fmt.Sprintf("%d", n)
@@ -932,186 +960,175 @@ const webAppHTML = `<!DOCTYPE html>
 <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
 <style>
 :root{
-  --bg:#070b10; --panel:#0d1420; --panel2:#111b2b;
-  --green:#00f5d4; --green2:#00ff87; --text:#f3fffc;
-  --muted:#87a39d; --purple:#9d4dff; --orange:#ff9f43;
-  --blue:#3b82f6; --ton:#0098EA;
-  --border:rgba(255,255,255,.08);
+  --bg:#070b10;--panel:#0d1420;--panel2:#111b2b;
+  --green:#00f5d4;--green2:#00ff87;--text:#f3fffc;
+  --muted:#87a39d;--purple:#9d4dff;--orange:#ff9f43;
+  --ton:#0098EA;--border:rgba(255,255,255,.08);
 }
-*{ margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent!important; }
-html,body{ overscroll-behavior:none; -webkit-text-size-adjust:none; text-size-adjust:none; }
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent!important;}
+html,body{overscroll-behavior:none;-webkit-text-size-adjust:none;text-size-adjust:none;}
 body{
-  background: radial-gradient(circle at top left,rgba(0,245,212,.12),transparent 40%),
-              radial-gradient(circle at top right,rgba(0,255,135,.08),transparent 40%), #070b10;
-  color:var(--text); font-family:-apple-system,'Inter','Segoe UI',sans-serif;
-  min-height:100vh; min-height:-webkit-fill-available;
-  overflow-x:hidden; -webkit-user-select:none; user-select:none; touch-action:pan-y;
+  background:radial-gradient(circle at top left,rgba(0,245,212,.12),transparent 40%),
+             radial-gradient(circle at top right,rgba(0,255,135,.08),transparent 40%),#070b10;
+  color:var(--text);font-family:-apple-system,'Inter','Segoe UI',sans-serif;
+  min-height:100vh;min-height:-webkit-fill-available;
+  overflow-x:hidden;-webkit-user-select:none;user-select:none;touch-action:pan-y;
 }
 body::before{
-  content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
   background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),
                    linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
   background-size:40px 40px;
 }
-.app{ position:relative; z-index:1; max-width:600px; margin:auto; padding-bottom:130px; }
+.app{position:relative;z-index:1;max-width:600px;margin:auto;padding-bottom:130px;}
 .header{
-  position:sticky; top:0; display:flex; justify-content:space-between; align-items:center;
-  padding:14px 16px; backdrop-filter:blur(15px); -webkit-backdrop-filter:blur(15px);
-  background:rgba(7,11,16,.9); border-bottom:1px solid var(--border); z-index:100;
+  position:sticky;top:0;display:flex;justify-content:space-between;align-items:center;
+  padding:14px 16px;backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px);
+  background:rgba(7,11,16,.9);border-bottom:1px solid var(--border);z-index:100;
 }
-.userBox{ display:flex; flex-direction:column; gap:2px; }
-.userLabel{ font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
-.userName{ font-weight:800; font-size:15px; color:#fff; }
+.userBox{display:flex;flex-direction:column;gap:2px;}
+.userLabel{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+.userName{font-weight:800;font-size:15px;color:#fff;}
 .netBadge{
-  background:rgba(0,245,212,.15); color:var(--green);
-  border:1px solid rgba(0,245,212,.3); border-radius:999px;
-  padding:8px 12px; font-size:11px; font-weight:800;
-  box-shadow:0 0 18px rgba(0,245,212,.2);
+  background:rgba(0,245,212,.15);color:var(--green);
+  border:1px solid rgba(0,245,212,.3);border-radius:999px;
+  padding:8px 12px;font-size:11px;font-weight:800;box-shadow:0 0 18px rgba(0,245,212,.2);
 }
-.page{ padding:16px; display:flex; flex-direction:column; gap:14px; }
+.page{padding:16px;display:flex;flex-direction:column;gap:14px;}
 .section{
   background:linear-gradient(180deg,rgba(17,27,43,.96),rgba(13,20,32,.96));
-  border-radius:24px; border:1px solid var(--border); padding:20px;
+  border-radius:24px;border:1px solid var(--border);padding:20px;
 }
-.balance-container{ text-align:center; margin-bottom:8px; margin-top:4px; }
-.balanceTitle{ color:var(--muted); font-size:11px; letter-spacing:2px; text-transform:uppercase; }
+.balance-container{text-align:center;margin-bottom:8px;margin-top:4px;}
+.balanceTitle{color:var(--muted);font-size:11px;letter-spacing:2px;text-transform:uppercase;}
 .balanceValue{
-  margin-top:6px; font-size:44px; font-weight:900; color:white;
+  margin-top:6px;font-size:44px;font-weight:900;color:white;
   text-shadow:0 0 20px rgba(0,245,212,.5),0 0 40px rgba(0,245,212,.25);
-  letter-spacing:-1px; line-height:1;
+  letter-spacing:-1px;line-height:1;
 }
 .passive-badge{
-  margin-top:6px; display:inline-flex; align-items:center; gap:5px;
-  background:rgba(255,159,67,.12); border:1px solid rgba(255,159,67,.25);
-  color:var(--orange); border-radius:999px; padding:4px 10px;
-  font-size:11px; font-weight:700;
+  margin-top:6px;display:inline-flex;align-items:center;gap:5px;
+  background:rgba(255,159,67,.12);border:1px solid rgba(255,159,67,.25);
+  color:var(--orange);border-radius:999px;padding:4px 10px;font-size:11px;font-weight:700;
 }
-.coinArea{
-  display:flex; flex-direction:column; align-items:center;
-  justify-content:center; padding:8px 0; position:relative;
-}
+.coinArea{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 0;position:relative;}
 .coin{
-  width:min(240px,62vw); height:min(240px,62vw); cursor:pointer;
+  width:min(240px,62vw);height:min(240px,62vw);cursor:pointer;
   transition:transform .07s cubic-bezier(.25,.46,.45,.94);
-  -webkit-user-select:none; user-select:none;
-  -webkit-tap-highlight-color:transparent!important;
-  outline:none; touch-action:manipulation; display:block; will-change:transform;
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent!important;
+  outline:none;touch-action:manipulation;display:block;will-change:transform;
 }
-.coin:active{ transform:scale(.91)!important; }
-.energyRow{ margin-top:16px; display:flex; gap:10px; align-items:center; }
-.energyBox{ flex:1; }
-.energyLabel{ font-size:11px; color:var(--muted); margin-bottom:5px; display:flex; justify-content:space-between; }
-.energyBar{ width:100%; height:12px; border-radius:999px; overflow:hidden; background:#08111b; border:1px solid rgba(255,255,255,.06); }
-.energyFill{ width:100%; height:100%; background:linear-gradient(90deg,var(--green),var(--green2)); box-shadow:0 0 12px rgba(0,245,212,.3); transition:width .15s ease; }
+.coin:active{transform:scale(.91)!important;}
+.energyRow{margin-top:16px;display:flex;gap:10px;align-items:center;}
+.energyBox{flex:1;}
+.energyLabel{font-size:11px;color:var(--muted);margin-bottom:5px;display:flex;justify-content:space-between;}
+.energyBar{width:100%;height:12px;border-radius:999px;overflow:hidden;background:#08111b;border:1px solid rgba(255,255,255,.06);}
+.energyFill{width:100%;height:100%;background:linear-gradient(90deg,var(--green),var(--green2));box-shadow:0 0 12px rgba(0,245,212,.3);transition:width .15s ease;}
 .btn{
-  border:none; cursor:pointer; padding:11px 16px; border-radius:14px;
-  font-weight:800; font-size:13px;
-  background:linear-gradient(135deg,var(--green),var(--green2));
-  color:#04120d; box-shadow:0 0 20px rgba(0,245,212,.2);
-  transition:filter .15s,transform .1s; white-space:nowrap;
-  -webkit-tap-highlight-color:transparent!important;
+  border:none;cursor:pointer;padding:11px 16px;border-radius:14px;
+  font-weight:800;font-size:13px;background:linear-gradient(135deg,var(--green),var(--green2));
+  color:#04120d;box-shadow:0 0 20px rgba(0,245,212,.2);
+  transition:filter .15s,transform .1s;white-space:nowrap;-webkit-tap-highlight-color:transparent!important;
 }
-.btn:active{ transform:scale(.96); }
-.btn:hover{ filter:brightness(1.07); }
-.btn:disabled{ opacity:.45; cursor:not-allowed; pointer-events:none; }
-.btn-secondary{ background:#1b2a3d; color:#a0c4c0; box-shadow:none; border:1px solid rgba(255,255,255,.07); }
-.btn-danger{ background:linear-gradient(135deg,#c0392b,#e74c3c); color:#fff; box-shadow:0 0 20px rgba(231,76,60,.25); }
-.btn-purple{ background:linear-gradient(135deg,#7c3aed,#9d4dff); color:#fff; }
-.btn-orange{ background:linear-gradient(135deg,#e67e22,#ff9f43); color:#fff; }
-.btn-ton{ background:linear-gradient(135deg,#0077c2,#0098EA); color:#fff; box-shadow:0 0 20px rgba(0,152,234,.3); }
-.btn-sm{ padding:8px 14px; font-size:12px; border-radius:10px; }
-.upgrades{ margin-top:18px; display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
-.upgradeCard{ background:rgba(0,0,0,.22); border:1px solid rgba(255,255,255,.06); border-radius:18px; padding:14px; }
-.upgradeCardFull{ background:rgba(0,0,0,.22); border:1px solid rgba(255,159,67,.15); border-radius:18px; padding:14px; margin-top:10px; }
-.upgradeTitle{ font-size:13px; font-weight:800; margin-bottom:4px; }
-.upgradeSub{ font-size:11px; color:var(--muted); margin-bottom:10px; }
-.bottomNav{ position:fixed; left:0; right:0; bottom:0; padding:8px 12px; padding-bottom:max(8px,env(safe-area-inset-bottom)); z-index:999; }
+.btn:active{transform:scale(.96);}
+.btn:hover{filter:brightness(1.07);}
+.btn:disabled{opacity:.45;cursor:not-allowed;pointer-events:none;}
+.btn-secondary{background:#1b2a3d;color:#a0c4c0;box-shadow:none;border:1px solid rgba(255,255,255,.07);}
+.btn-danger{background:linear-gradient(135deg,#c0392b,#e74c3c);color:#fff;box-shadow:0 0 20px rgba(231,76,60,.25);}
+.btn-purple{background:linear-gradient(135deg,#7c3aed,#9d4dff);color:#fff;}
+.btn-orange{background:linear-gradient(135deg,#e67e22,#ff9f43);color:#fff;}
+.btn-ton{background:linear-gradient(135deg,#0077c2,#0098EA);color:#fff;box-shadow:0 0 20px rgba(0,152,234,.3);}
+.btn-sm{padding:8px 14px;font-size:12px;border-radius:10px;}
+.upgrades{margin-top:18px;display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
+.upgradeCard{background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.06);border-radius:18px;padding:14px;}
+.upgradeCardFull{background:rgba(0,0,0,.22);border:1px solid rgba(255,159,67,.15);border-radius:18px;padding:14px;margin-top:10px;}
+.upgradeTitle{font-size:13px;font-weight:800;margin-bottom:4px;}
+.upgradeSub{font-size:11px;color:var(--muted);margin-bottom:10px;}
+.levelBar{width:100%;height:6px;background:rgba(255,255,255,.08);border-radius:999px;margin:6px 0 10px;overflow:hidden;}
+.levelBarFill{height:100%;background:linear-gradient(90deg,var(--green),var(--green2));border-radius:999px;transition:width .3s;}
+.bottomNav{position:fixed;left:0;right:0;bottom:0;padding:8px 12px;padding-bottom:max(8px,env(safe-area-inset-bottom));z-index:999;}
 .bottomInner{
-  max-width:600px; margin:auto; display:grid; grid-template-columns:repeat(5,1fr); gap:6px;
-  background:rgba(8,14,22,.97); border:1px solid rgba(255,255,255,.06);
-  border-radius:22px; padding:8px; backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  max-width:600px;margin:auto;display:grid;grid-template-columns:repeat(6,1fr);gap:4px;
+  background:rgba(8,14,22,.97);border:1px solid rgba(255,255,255,.06);
+  border-radius:22px;padding:8px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
 }
-.tabBtn{ background:none; border:none; color:#87a39d; padding:8px 4px; border-radius:14px; cursor:pointer; font-weight:800; font-size:10px; transition:.2s; line-height:1.3; -webkit-tap-highlight-color:transparent!important; }
-.tabBtn.active{ color:#04120d; background:linear-gradient(135deg,var(--green),var(--green2)); }
-.hidden{ display:none!important; }
-.verify-btn{ display:none!important; }
+.tabBtn{background:none;border:none;color:#87a39d;padding:7px 2px;border-radius:12px;cursor:pointer;font-weight:800;font-size:9px;transition:.2s;line-height:1.3;-webkit-tap-highlight-color:transparent!important;}
+.tabBtn.active{color:#04120d;background:linear-gradient(135deg,var(--green),var(--green2));}
+.hidden{display:none!important;}
+/* verify button hidden until link clicked */
+.verify-btn{display:none;}
 .floatGain{
-  position:fixed; color:white; font-weight:900; font-size:22px;
-  pointer-events:none; z-index:99999;
+  position:fixed;color:white;font-weight:900;font-size:22px;
+  pointer-events:none;z-index:99999;
   text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 12px rgba(0,255,135,.9);
-  animation:floatUp .75s ease-out forwards; will-change:transform,opacity;
+  animation:floatUp .75s ease-out forwards;will-change:transform,opacity;
 }
-@keyframes floatUp{ from{opacity:1;transform:translateY(0) scale(1)} to{opacity:0;transform:translateY(-90px) scale(.75)} }
-.leaderboardItem{ display:flex; align-items:center; padding:12px 0; border-bottom:1px solid rgba(255,255,255,.05); gap:8px; }
-.leaderboardRank{ width:28px; color:var(--green); font-weight:900; font-size:14px; }
-.leaderboardName{ flex:1; font-size:13px; }
-.leaderboardBalance{ color:#fff; font-weight:700; font-size:13px; }
+@keyframes floatUp{from{opacity:1;transform:translateY(0) scale(1)}to{opacity:0;transform:translateY(-90px) scale(.75)}}
+.leaderboardItem{display:flex;align-items:center;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.05);gap:8px;}
+.leaderboardRank{width:28px;color:var(--green);font-weight:900;font-size:14px;}
+.leaderboardName{flex:1;font-size:13px;}
+.leaderboardBalance{color:#fff;font-weight:700;font-size:13px;}
 .taskCard{
-  background:rgba(0,0,0,.2); border:1px solid rgba(255,255,255,.06);
-  border-radius:18px; padding:14px 16px;
-  display:flex; justify-content:space-between; align-items:center; gap:12px;
-  margin-bottom:10px;
+  background:rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.06);
+  border-radius:18px;padding:14px 16px;
+  display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;
 }
-.taskInfo{ flex:1; }
-.taskTitle{ font-size:14px; font-weight:800; margin-bottom:3px; }
-.taskDesc{ font-size:11px; color:var(--muted); }
-.taskReward{ font-size:12px; color:var(--green); font-weight:700; margin-top:3px; }
-.checkinGrid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; margin-top:14px; }
+.taskInfo{flex:1;}
+.taskTitle{font-size:14px;font-weight:800;margin-bottom:3px;}
+.taskDesc{font-size:11px;color:var(--muted);}
+.taskReward{font-size:12px;color:var(--green);font-weight:700;margin-top:3px;}
+.checkinGrid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:14px;}
 .checkinDay{
-  aspect-ratio:1; border-radius:10px; display:flex; flex-direction:column;
-  align-items:center; justify-content:center; font-size:9px; font-weight:700;
-  background:rgba(0,0,0,.2); border:1px solid rgba(255,255,255,.06); gap:2px;
+  aspect-ratio:1;border-radius:10px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;font-size:9px;font-weight:700;
+  background:rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.06);gap:2px;
 }
-.checkinDay.done{ background:rgba(0,245,212,.15); border-color:rgba(0,245,212,.3); color:var(--green); }
-.checkinDay.today{ border-color:var(--orange); box-shadow:0 0 10px rgba(255,159,67,.3); }
-.referralBox{ background:rgba(0,0,0,.2); border:1px solid rgba(157,77,255,.2); border-radius:18px; padding:16px; }
+.checkinDay.done{background:rgba(0,245,212,.15);border-color:rgba(0,245,212,.3);color:var(--green);}
+.checkinDay.today{border-color:var(--orange);box-shadow:0 0 10px rgba(255,159,67,.3);}
+.referralBox{background:rgba(0,0,0,.2);border:1px solid rgba(157,77,255,.2);border-radius:18px;padding:16px;}
 .referralCode{
-  font-size:22px; font-weight:900; color:var(--purple); letter-spacing:3px;
-  text-align:center; padding:12px; background:rgba(157,77,255,.1);
-  border-radius:12px; margin:10px 0; text-shadow:0 0 20px rgba(157,77,255,.5);
+  font-size:22px;font-weight:900;color:var(--purple);letter-spacing:3px;
+  text-align:center;padding:12px;background:rgba(157,77,255,.1);
+  border-radius:12px;margin:10px 0;text-shadow:0 0 20px rgba(157,77,255,.5);
 }
-.sectionTitle{ font-size:16px; font-weight:900; margin-bottom:16px; color:#d9fff5; }
-.stat-row{ display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.05); font-size:13px; }
-.stat-label{ color:var(--muted); }
-.stat-value{ font-weight:700; }
+.sectionTitle{font-size:16px;font-weight:900;margin-bottom:16px;color:#d9fff5;}
+.stat-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:13px;}
+.stat-label{color:var(--muted);}
+.stat-value{font-weight:700;}
 .toast{
-  position:fixed; top:70px; left:50%; transform:translateX(-50%);
-  background:#1a2940; border:1px solid rgba(0,245,212,.3); color:var(--green);
-  padding:10px 20px; border-radius:999px; font-weight:700; font-size:13px;
-  z-index:99999; pointer-events:none; opacity:0; transition:opacity .3s;
-  white-space:nowrap; max-width:90vw; text-align:center;
+  position:fixed;top:70px;left:50%;transform:translateX(-50%);
+  background:#1a2940;border:1px solid rgba(0,245,212,.3);color:var(--green);
+  padding:10px 20px;border-radius:999px;font-weight:700;font-size:13px;
+  z-index:99999;pointer-events:none;opacity:0;transition:opacity .3s;
+  white-space:nowrap;max-width:90vw;text-align:center;
 }
-.toast.show{ opacity:1; }
-#ton-connect-btn{ display:block; }
-.ton-wallet-card{
-  background:rgba(0,152,234,.08); border:1px solid rgba(0,152,234,.25);
-  border-radius:18px; padding:16px; margin-bottom:14px;
+.toast.show{opacity:1;}
+/* TON Wallet */
+.ton-wallet-card{background:rgba(0,152,234,.08);border:1px solid rgba(0,152,234,.25);border-radius:18px;padding:20px;margin-bottom:14px;text-align:center;}
+.ton-addr{font-size:12px;color:#7dd3fc;word-break:break-all;background:rgba(0,0,0,.2);padding:10px;border-radius:10px;margin-top:10px;font-family:monospace;}
+.wallet-status{display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;margin-bottom:16px;}
+.wallet-dot{width:8px;height:8px;border-radius:50%;background:#666;}
+.wallet-dot.connected{background:var(--green);box-shadow:0 0 6px var(--green);}
+#ton-connect-btn{display:flex;justify-content:center;}
+/* Profile */
+.profile-avatar{
+  width:80px;height:80px;border-radius:50%;
+  background:linear-gradient(135deg,var(--green),var(--purple));
+  display:flex;align-items:center;justify-content:center;
+  font-size:32px;font-weight:900;color:#fff;margin:0 auto 12px;
+  box-shadow:0 0 30px rgba(0,245,212,.3);
 }
-.ton-addr{
-  font-size:12px; color:#7dd3fc; word-break:break-all;
-  background:rgba(0,0,0,.2); padding:10px; border-radius:10px;
-  margin-top:10px; font-family:monospace;
-}
-.wallet-status{ display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:12px; }
-.wallet-dot{ width:8px; height:8px; border-radius:50%; background:#666; }
-.wallet-dot.connected{ background:var(--green); box-shadow:0 0 6px var(--green); }
-.manual-wallet{ margin-top:16px; }
-.ad-loading{
-  display:none; position:fixed; inset:0; background:rgba(0,0,0,.7);
-  backdrop-filter:blur(8px); z-index:9000; align-items:center; justify-content:center;
-  flex-direction:column; gap:16px;
-}
-.ad-loading.show{ display:flex; }
-.ad-spinner{
-  width:40px; height:40px; border:3px solid rgba(0,245,212,.2);
-  border-top-color:var(--green); border-radius:50%; animation:spin .8s linear infinite;
-}
-@keyframes spin{ to{transform:rotate(360deg)} }
+.profile-name{font-size:22px;font-weight:900;text-align:center;margin-bottom:4px;}
+.profile-username{font-size:13px;color:var(--muted);text-align:center;margin-bottom:20px;}
+/* Ad loading */
+.ad-loading{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);z-index:9000;align-items:center;justify-content:center;flex-direction:column;gap:16px;}
+.ad-loading.show{display:flex;}
+.ad-spinner{width:40px;height:40px;border:3px solid rgba(0,245,212,.2);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
 <div id="toastEl" class="toast"></div>
-
 <div id="adLoading" class="ad-loading">
   <div class="ad-spinner"></div>
   <div style="color:var(--muted);font-size:13px;">Se încarcă reclama...</div>
@@ -1121,14 +1138,14 @@ body::before{
 <header class="header">
   <div class="userBox">
     <div class="userLabel">User Core</div>
-    <div id="telegramUser" class="userName">Guest</div>
+    <div id="headerName" class="userName">Guest</div>
   </div>
   <div class="netBadge">⚡ ZX-NET LIVE</div>
 </header>
 
 <div class="page">
 
-<!-- GENERATOR TAB -->
+<!-- ══════════════════════ GENERATOR TAB ══════════════════════ -->
 <div id="generatorTab" class="section">
   <div class="balance-container">
     <div class="balanceTitle">Total ZX Tokens</div>
@@ -1190,23 +1207,28 @@ body::before{
   <div class="upgrades">
     <div class="upgradeCard">
       <div class="upgradeTitle">👆 Multitap</div>
-      <div class="upgradeSub">Lv.<span id="tapLvl">0</span> · <span id="tapCost">1.000</span> ZX</div>
+      <div class="upgradeSub">Lv.<span id="tapLvl">0</span>/20 · +<span id="tapGain">1</span> ZX/tap</div>
+      <div class="levelBar"><div id="tapLvlBar" class="levelBarFill" style="width:0%"></div></div>
+      <div class="upgradeSub">Cost: <span id="tapCost">1.000</span> ZX</div>
       <button id="buyTap" class="btn" style="width:100%">Upgrade</button>
     </div>
     <div class="upgradeCard">
       <div class="upgradeTitle">⚡ Max Energie</div>
-      <div class="upgradeSub">Lv.<span id="energyLvl">0</span> · <span id="energyCost">2.500</span> ZX</div>
+      <div class="upgradeSub">Lv.<span id="energyLvl">0</span>/20 · <span id="energyMax">500</span> max</div>
+      <div class="levelBar"><div id="energyLvlBar" class="levelBarFill" style="width:0%"></div></div>
+      <div class="upgradeSub">Cost: <span id="energyCost">2.500</span> ZX</div>
       <button id="buyEnergy" class="btn" style="width:100%">Upgrade</button>
     </div>
   </div>
   <div class="upgradeCardFull">
-    <div class="upgradeTitle">⚙️ Passive Mining — Lv.<span id="passiveLvl">0</span></div>
+    <div class="upgradeTitle">⚙️ Passive Mining — Lv.<span id="passiveLvl">0</span>/20</div>
+    <div class="levelBar"><div id="passiveLvlBar" class="levelBarFill" style="width:0%"></div></div>
     <div class="upgradeSub"><span id="passiveRateDisp">0</span> ZX/oră · Cost: <span id="passiveCost">5.000</span> ZX</div>
     <button id="buyPassive" class="btn btn-orange" style="width:100%;margin-top:8px">Upgrade Passive Mining</button>
   </div>
 </div>
 
-<!-- TASKS TAB -->
+<!-- ══════════════════════ TASKS TAB ══════════════════════ -->
 <div id="tasksTab" class="section hidden">
   <div class="sectionTitle">💼 Tasks & Misiuni</div>
 
@@ -1219,10 +1241,11 @@ body::before{
     <button id="checkinBtn" class="btn" style="width:100%;margin-top:14px">🎁 Revendică Recompensa Zilnică</button>
   </div>
 
-  <div class="taskCard" id="taskAdCard">
+  <!-- Adsgram ad -->
+  <div class="taskCard">
     <div class="taskInfo">
-      <div class="taskTitle">📺 Vizionează Reclamă (Adsgram)</div>
-      <div class="taskDesc">Reclamă reală, recompensă garantată</div>
+      <div class="taskTitle">📺 Vizionează Reclamă</div>
+      <div class="taskDesc">Reclamă reală Adsgram, fără cooldown</div>
       <div class="taskReward">+<span id="rewardAdDisp">1.000</span> ZX per reclamă</div>
     </div>
     <button id="watchAdBtn" class="btn btn-sm">▶ Watch</button>
@@ -1233,63 +1256,63 @@ body::before{
     <div class="taskInfo">
       <div class="taskTitle">📢 Abonare Canal Telegram</div>
       <div class="taskDesc" id="ch1Desc">Abonează-te la canalul oficial</div>
-      <div class="taskReward">+<span id="rewardCh1Disp">2.500</span> ZX</div>
+      <div class="taskReward">+<span id="rewardCh1Disp">10.000</span> ZX</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
       <a id="ch1Link" href="#" target="_blank" class="btn btn-sm btn-secondary"
-         onclick="showVerifyBtn(event,'channel1')">Deschide</a>
+         onclick="showVerifyBtn('channel1')">Deschide</a>
       <button id="taskBtn_channel1" class="btn btn-sm verify-btn"
-              onclick="claimTask('channel1', this)">Verifică</button>
+              onclick="claimTask('channel1',this)">Verifică ✓</button>
     </div>
   </div>
 
-  <!-- Canal 2 (opțional) -->
+  <!-- Canal 2 optional -->
   <div class="taskCard hidden" id="taskCh2Card">
     <div class="taskInfo">
       <div class="taskTitle">📢 Al doilea Canal</div>
-      <div class="taskDesc" id="ch2Desc">Abonează-te la canalul secundar</div>
+      <div class="taskDesc">Abonează-te la canalul secundar</div>
       <div class="taskReward">+<span id="rewardCh2Disp">1.500</span> ZX</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
       <a id="ch2Link" href="#" target="_blank" class="btn btn-sm btn-secondary"
-         onclick="showVerifyBtn(event,'channel2')">Deschide</a>
+         onclick="showVerifyBtn('channel2')">Deschide</a>
       <button id="taskBtn_channel2" class="btn btn-sm verify-btn"
-              onclick="claimTask('channel2', this)">Verifică</button>
+              onclick="claimTask('channel2',this)">Verifică ✓</button>
     </div>
   </div>
 
   <!-- Twitter -->
-  <div class="taskCard" id="taskTwCard">
+  <div class="taskCard">
     <div class="taskInfo">
       <div class="taskTitle">🐦 Follow Twitter / X</div>
       <div class="taskDesc">Urmărește contul oficial</div>
-      <div class="taskReward">+<span id="rewardTwDisp">750</span> ZX</div>
+      <div class="taskReward">+<span id="rewardTwDisp">5.000</span> ZX</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
       <a id="twLink" href="#" target="_blank" class="btn btn-sm btn-secondary"
-         onclick="showVerifyBtn(event,'twitter')">Deschide</a>
+         onclick="showVerifyBtn('twitter')">Deschide</a>
       <button id="taskBtn_twitter" class="btn btn-sm verify-btn"
-              onclick="claimTask('twitter', this)">Revendică</button>
+              onclick="claimTask('twitter',this)">Revendică ✓</button>
     </div>
   </div>
 
   <!-- Partner bot -->
-  <div class="taskCard" id="taskPartnerCard">
+  <div class="taskCard">
     <div class="taskInfo">
       <div class="taskTitle">🤖 Start Bot Partener</div>
       <div class="taskDesc">Activează botul partener</div>
-      <div class="taskReward">+<span id="rewardPartnerDisp">2.000</span> ZX</div>
+      <div class="taskReward">+<span id="rewardPartnerDisp">20.000</span> ZX</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
       <a id="partnerLink" href="#" target="_blank" class="btn btn-sm btn-secondary"
-         onclick="showVerifyBtn(event,'partner')">Deschide</a>
+         onclick="showVerifyBtn('partner')">Deschide</a>
       <button id="taskBtn_partner" class="btn btn-sm verify-btn"
-              onclick="claimTask('partner', this)">Revendică</button>
+              onclick="claimTask('partner',this)">Revendică ✓</button>
     </div>
   </div>
 </div>
 
-<!-- REFERRAL TAB -->
+<!-- ══════════════════════ REFERRAL TAB ══════════════════════ -->
 <div id="referralTab" class="section hidden">
   <div class="sectionTitle">👥 Sistem Referrals</div>
   <div class="referralBox">
@@ -1320,30 +1343,20 @@ body::before{
   </div>
 </div>
 
-<!-- WALLET TAB -->
+<!-- ══════════════════════ WALLET TAB ══════════════════════ -->
 <div id="walletTab" class="section hidden">
-  <div class="sectionTitle">👛 TON Wallet & Balanță</div>
+  <div class="sectionTitle">👛 TON Wallet</div>
 
   <div class="ton-wallet-card">
     <div class="wallet-status">
       <div class="wallet-dot" id="walletDot"></div>
       <span id="walletStatusTxt">Wallet neconectat</span>
     </div>
-    <div id="ton-connect-btn">
-      <div style="color:var(--muted);font-size:13px;padding:10px;">Se încarcă wallet...</div>
-    </div>
+    <!-- TON Connect button injected here -->
+    <div id="ton-connect-btn"></div>
     <div id="tonAddrDisplay" class="ton-addr hidden"></div>
-    <div id="tonBalanceRow" class="hidden" style="margin-top:10px;font-size:12px;color:var(--muted)">
-      Adresa salvată pentru retrageri viitoare ✅
-    </div>
-    <!-- Manual address input -->
-    <div class="manual-wallet">
-      <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--text);">Sau introdu adresa manual:</div>
-      <div style="display:flex;gap:8px;">
-        <input id="manualWalletInput" type="text" placeholder="Ex: EQD2...hX"
-          style="flex:1;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:12px 14px;color:white;font-size:13px;outline:none;"/>
-        <button id="manualSaveWallet" class="btn btn-ton btn-sm">Salvează manual</button>
-      </div>
+    <div id="tonSavedRow" class="hidden" style="margin-top:10px;font-size:12px;color:var(--muted);text-align:center">
+      ✅ Adresa salvată pentru retrageri viitoare
     </div>
   </div>
 
@@ -1362,26 +1375,15 @@ body::before{
           <th style="border-bottom:1px solid rgba(255,255,255,.08)">Status</th>
         </tr>
       </thead>
-      <tbody id="withdrawTable">
-        <tr>
-          <td style="padding:10px 4px">2026-06-01</td>
-          <td style="text-align:center">120.000</td>
-          <td style="text-align:center;color:#ffd166">În așteptare</td>
-        </tr>
-        <tr>
-          <td style="padding:10px 4px">2026-05-24</td>
-          <td style="text-align:center">50.000</td>
-          <td style="text-align:center;color:#00ff87">Finalizat</td>
-        </tr>
+      <tbody>
+        <tr><td style="padding:10px 4px">2026-06-01</td><td style="text-align:center">120.000</td><td style="text-align:center;color:#ffd166">În așteptare</td></tr>
+        <tr><td style="padding:10px 4px">2026-05-24</td><td style="text-align:center">50.000</td><td style="text-align:center;color:#00ff87">Finalizat</td></tr>
       </tbody>
     </table>
   </div>
-  <div style="margin-top:20px">
-    <button id="deleteAccountBtn" class="btn btn-danger" style="width:100%">🗑️ Șterge Datele Locale</button>
-  </div>
 </div>
 
-<!-- RANK TAB -->
+<!-- ══════════════════════ RANK TAB ══════════════════════ -->
 <div id="rankTab" class="section hidden">
   <div class="sectionTitle">🏆 Global Leaderboard</div>
   <div id="leaderboard"><div style="color:var(--muted);text-align:center;padding:20px">Se încarcă...</div></div>
@@ -1390,6 +1392,56 @@ body::before{
     <div style="font-size:12px;color:#b79cff">Poziția ta</div>
     <div id="myRank" style="margin-top:6px;font-size:28px;font-weight:900">#-</div>
     <div id="myBalanceRank" style="margin-top:4px;color:#e9dbff;font-size:14px">0 ZX</div>
+  </div>
+</div>
+
+<!-- ══════════════════════ PROFILE TAB ══════════════════════ -->
+<div id="profileTab" class="section hidden">
+  <div class="sectionTitle">👤 Profil</div>
+
+  <div style="text-align:center;margin-bottom:24px">
+    <div class="profile-avatar" id="profileAvatar">?</div>
+    <div class="profile-name" id="profileName">—</div>
+    <div class="profile-username" id="profileUsername">@—</div>
+  </div>
+
+  <div class="stat-row">
+    <span class="stat-label">💰 Balanță</span>
+    <span class="stat-value" id="profileBalance">0 ZX</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">👆 Nivel Multitap</span>
+    <span class="stat-value" id="profileTapLvl">0 / 20</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">⚡ Nivel Energie</span>
+    <span class="stat-value" id="profileEnergyLvl">0 / 20</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">⚙️ Nivel Passive Mining</span>
+    <span class="stat-value" id="profilePassiveLvl">0 / 20</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">📅 Streak Check-in</span>
+    <span class="stat-value" id="profileStreak">0 zile</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">👥 Referrali</span>
+    <span class="stat-value" id="profileReferrals">0</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">🔗 Telegram ID</span>
+    <span class="stat-value" id="profileTgId" style="font-size:11px;color:var(--muted)">—</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">👛 Wallet TON</span>
+    <span class="stat-value" id="profileWallet" style="font-size:10px;color:#7dd3fc;max-width:60%;word-break:break-all;text-align:right">Neconectat</span>
+  </div>
+
+  <div style="margin-top:24px;padding:16px;background:rgba(231,76,60,.06);border:1px solid rgba(231,76,60,.2);border-radius:18px">
+    <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:#ff8080">⚠️ Zona Periculoasă</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Ștergerea contului este permanentă și elimină tot progresul salvat pe server.</div>
+    <button id="deleteAccountBtn" class="btn btn-danger" style="width:100%">🗑️ Șterge Contul Complet</button>
   </div>
 </div>
 
@@ -1414,9 +1466,10 @@ body::before{
   <div class="bottomInner">
     <button class="tabBtn active" data-tab="generator">🎮<br>Mine</button>
     <button class="tabBtn" data-tab="tasks">💼<br>Tasks</button>
-    <button class="tabBtn" data-tab="referral">👥<br>Referral</button>
+    <button class="tabBtn" data-tab="referral">👥<br>Ref</button>
     <button class="tabBtn" data-tab="wallet">👛<br>Wallet</button>
     <button class="tabBtn" data-tab="rank">🏆<br>Rank</button>
+    <button class="tabBtn" data-tab="profile">👤<br>Profil</button>
   </div>
 </div>
 
@@ -1424,7 +1477,7 @@ body::before{
 (function(){
 'use strict';
 
-// ─── Telegram init ───────────────────────────────────────────────────────────
+// ─── Telegram ────────────────────────────────────────────────────────────────
 var tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
 var cu = { username:'guest', firstName:'Guest', id:0 };
 if(tg){
@@ -1432,159 +1485,207 @@ if(tg){
   if(tg.disableVerticalSwipes) tg.disableVerticalSwipes();
   var u = tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
   if(u){
-    cu.username = u.username || ('id'+u.id);
+    cu.username  = u.username || ('id'+u.id);
     cu.firstName = u.first_name || u.username || 'Player';
-    cu.id = u.id || 0;
+    cu.id        = u.id || 0;
   }
 }
-document.getElementById('telegramUser').textContent = cu.firstName;
+document.getElementById('headerName').textContent = cu.firstName;
 
-// ─── App config (loaded from server) ─────────────────────────────────────────
+// ─── Level caps ───────────────────────────────────────────────────────────────
+var MAX_LVL = 20;
+
+// ─── Config from server ───────────────────────────────────────────────────────
 var cfg = {
   adsgramBlockId:'', linkChannel:'#', linkChannel2:'#', linkTwitter:'#', linkPartner:'#',
   channel2Enabled:false,
-  rewardChannel:2500, rewardChannel2:1500, rewardTwitter:750, rewardPartner:2000, rewardAd:1000,
+  rewardChannel:10000, rewardChannel2:1500, rewardTwitter:5000, rewardPartner:20000, rewardAd:1000,
   appUrl:''
 };
 
 fetch('/api/config').then(function(r){ return r.json(); }).then(function(d){
   cfg = d;
-  var ch1 = document.getElementById('ch1Link');
-  if(ch1) ch1.href = cfg.linkChannel;
-  var ch2Card = document.getElementById('taskCh2Card');
-  if(cfg.channel2Enabled && ch2Card) ch2Card.classList.remove('hidden');
-  var ch2l = document.getElementById('ch2Link');
-  if(ch2l) ch2l.href = cfg.linkChannel2;
-  var twl = document.getElementById('twLink');
-  if(twl) twl.href = cfg.linkTwitter;
-  var pl = document.getElementById('partnerLink');
-  if(pl) pl.href = cfg.linkPartner;
-  function setDisp(id, val){ var el=document.getElementById(id); if(el) el.textContent=fmt(val); }
-  setDisp('rewardAdDisp', cfg.rewardAd);
-  setDisp('rewardCh1Disp', cfg.rewardChannel);
-  setDisp('rewardCh2Disp', cfg.rewardChannel2);
-  setDisp('rewardTwDisp', cfg.rewardTwitter);
-  setDisp('rewardPartnerDisp', cfg.rewardPartner);
+  var el; 
+  el = document.getElementById('ch1Link');   if(el) el.href = cfg.linkChannel;
+  el = document.getElementById('ch2Link');   if(el) el.href = cfg.linkChannel2;
+  el = document.getElementById('twLink');    if(el) el.href = cfg.linkTwitter;
+  el = document.getElementById('partnerLink'); if(el) el.href = cfg.linkPartner;
+  if(cfg.channel2Enabled){ var c2=document.getElementById('taskCh2Card'); if(c2) c2.classList.remove('hidden'); }
+  function sd(id,v){ var e=document.getElementById(id); if(e) e.textContent=fmt(v); }
+  sd('rewardAdDisp',cfg.rewardAd); sd('rewardCh1Disp',cfg.rewardChannel);
+  sd('rewardCh2Disp',cfg.rewardChannel2); sd('rewardTwDisp',cfg.rewardTwitter);
+  sd('rewardPartnerDisp',cfg.rewardPartner);
   initAdsgram();
   initTonConnect();
   restoreVerifyButtons();
-  syncManualAddressField();
-}).catch(function(){
-  initAdsgram();
-  initTonConnect();
-  restoreVerifyButtons();
-  syncManualAddressField();
-});
+}).catch(function(){ initAdsgram(); initTonConnect(); restoreVerifyButtons(); });
 
 // ─── State ────────────────────────────────────────────────────────────────────
-var SK = 'zxnet-v3';
+var SK = 'zxnet-v4';
 var raw = {};
 try{ raw = JSON.parse(localStorage.getItem(SK)||'{}'); }catch(e){}
 var state = {
-  balance:       raw.balance       !== undefined ? raw.balance : 0,
-  energy:        raw.energy        !== undefined ? raw.energy  : 500,
-  maxEnergy:     raw.maxEnergy     !== undefined ? raw.maxEnergy : 500,
-  tapLevel:      raw.tapLevel      || 0,
-  energyLevel:   raw.energyLevel   || 0,
-  passiveLevel:  raw.passiveLevel  || 0,
-  claimedTasks:  raw.claimedTasks  || {},
-  checkinStreak: raw.checkinStreak || 0,
-  lastCheckin:   raw.lastCheckin   || '',
-  referralCode:  raw.referralCode  || '',
+  balance:        raw.balance       !== undefined ? raw.balance : 0,
+  energy:         raw.energy        !== undefined ? raw.energy  : 500,
+  maxEnergy:      raw.maxEnergy     !== undefined ? raw.maxEnergy : 500,
+  tapLevel:       Math.min(raw.tapLevel     || 0, MAX_LVL),
+  energyLevel:    Math.min(raw.energyLevel  || 0, MAX_LVL),
+  passiveLevel:   Math.min(raw.passiveLevel || 0, MAX_LVL),
+  claimedTasks:   raw.claimedTasks  || {},
+  checkinStreak:  raw.checkinStreak || 0,
+  lastCheckin:    raw.lastCheckin   || '',
+  referralCode:   raw.referralCode  || '',
   referredByDone: raw.referredByDone || false,
-  walletAddress: raw.walletAddress || '',
-  linkClicked:   raw.linkClicked   || {}
+  walletAddress:  raw.walletAddress || '',
+  linkClicked:    raw.linkClicked   || {},
+  refCount:       raw.refCount      || 0
 };
-function save(){ try{ localStorage.setItem(SK, JSON.stringify(state)); }catch(e){} }
 
+function save(){ try{ localStorage.setItem(SK, JSON.stringify(state)); }catch(e){} }
 function fmt(v){ return Number(v).toLocaleString('ro-RO'); }
 
-var _toast;
+var _toastT;
 function toast(msg, dur){
-  var el = document.getElementById('toastEl');
-  el.textContent = msg; el.classList.add('show');
-  clearTimeout(_toast);
-  _toast = setTimeout(function(){ el.classList.remove('show'); }, dur||2500);
+  var el=document.getElementById('toastEl');
+  el.textContent=msg; el.classList.add('show');
+  clearTimeout(_toastT);
+  _toastT=setTimeout(function(){ el.classList.remove('show'); }, dur||2500);
 }
 
-function tapCost()     { return Math.round(1000 * Math.pow(state.tapLevel+1, 2.2)); }
-function energyCost()  { return Math.round(2500 * Math.pow(state.energyLevel+1, 2.2)); }
-function passiveCost() { return Math.round(5000 * Math.pow(state.passiveLevel+1, 2.5)); }
-function pph(lvl){ return lvl<=0 ? 0 : Math.round(100 * Math.pow(1.8, lvl-1)); }
+// ─── Level formulas (capped at 20) ──────────────────────────────────────────
+// Tap gain = 1 + tapLevel  (level 0 → 1 ZX, level 20 → 21 ZX)
+function tapGain()     { return 1 + state.tapLevel; }
+// Costs scale quadratically so level 20 requires significant grinding
+function tapCost()     { if(state.tapLevel >= MAX_LVL) return Infinity; return Math.round(1000 * Math.pow(state.tapLevel+1, 2.5)); }
+function energyCost()  { if(state.energyLevel >= MAX_LVL) return Infinity; return Math.round(2500 * Math.pow(state.energyLevel+1, 2.5)); }
+function passiveCost() { if(state.passiveLevel >= MAX_LVL) return Infinity; return Math.round(5000 * Math.pow(state.passiveLevel+1, 2.8)); }
+function pph(lvl)      { return lvl<=0 ? 0 : Math.round(100 * Math.pow(1.8, lvl-1)); }
+function calcMaxEnergy(lvl) { return 500 + lvl * 500; } // 500 base, +500/level, max lvl20 = 10500
 
+// ─── UI ───────────────────────────────────────────────────────────────────────
 function updateUI(){
   document.getElementById('balanceDisplay').textContent = fmt(state.balance);
   document.getElementById('walletBalance').textContent  = fmt(state.balance);
-  var pct = state.maxEnergy > 0 ? (state.energy/state.maxEnergy)*100 : 0;
+
+  var pct = state.maxEnergy > 0 ? (state.energy / state.maxEnergy)*100 : 0;
   document.getElementById('energyFill').style.width = pct+'%';
-  document.getElementById('energyText').textContent = state.energy+'/'+state.maxEnergy;
-  document.getElementById('tapLvl').textContent     = state.tapLevel;
-  document.getElementById('tapCost').textContent    = fmt(tapCost());
-  document.getElementById('buyTap').disabled        = state.balance < tapCost();
-  document.getElementById('energyLvl').textContent  = state.energyLevel;
-  document.getElementById('energyCost').textContent = fmt(energyCost());
-  document.getElementById('buyEnergy').disabled     = state.balance < energyCost();
-  document.getElementById('passiveLvl').textContent     = state.passiveLevel;
-  document.getElementById('passiveCost').textContent    = fmt(passiveCost());
-  document.getElementById('passiveRateDisp').textContent= fmt(pph(state.passiveLevel));
-  document.getElementById('buyPassive').disabled        = state.balance < passiveCost();
-  var ph = pph(state.passiveLevel);
+  document.getElementById('energyText').textContent  = state.energy+'/'+state.maxEnergy;
+
+  // Tap
+  var tl = state.tapLevel;
+  document.getElementById('tapLvl').textContent  = tl;
+  document.getElementById('tapGain').textContent = tapGain();
+  document.getElementById('tapLvlBar').style.width = (tl/MAX_LVL*100)+'%';
+  if(tl >= MAX_LVL){
+    document.getElementById('tapCost').textContent = 'MAX';
+    document.getElementById('buyTap').disabled = true;
+    document.getElementById('buyTap').textContent = '✅ MAX';
+  } else {
+    document.getElementById('tapCost').textContent    = fmt(tapCost());
+    document.getElementById('buyTap').disabled        = state.balance < tapCost();
+    document.getElementById('buyTap').textContent     = 'Upgrade';
+  }
+
+  // Energy
+  var el = state.energyLevel;
+  document.getElementById('energyLvl').textContent  = el;
+  document.getElementById('energyMax').textContent  = fmt(calcMaxEnergy(el));
+  document.getElementById('energyLvlBar').style.width = (el/MAX_LVL*100)+'%';
+  if(el >= MAX_LVL){
+    document.getElementById('energyCost').textContent = 'MAX';
+    document.getElementById('buyEnergy').disabled = true;
+    document.getElementById('buyEnergy').textContent = '✅ MAX';
+  } else {
+    document.getElementById('energyCost').textContent = fmt(energyCost());
+    document.getElementById('buyEnergy').disabled     = state.balance < energyCost();
+    document.getElementById('buyEnergy').textContent  = 'Upgrade';
+  }
+
+  // Passive
+  var pl = state.passiveLevel;
+  document.getElementById('passiveLvl').textContent      = pl;
+  document.getElementById('passiveRateDisp').textContent = fmt(pph(pl));
+  document.getElementById('passiveLvlBar').style.width   = (pl/MAX_LVL*100)+'%';
+  document.getElementById('passiveRate').textContent     = fmt(pph(pl));
+  if(pl >= MAX_LVL){
+    document.getElementById('passiveCost').textContent = 'MAX';
+    document.getElementById('buyPassive').disabled = true;
+    document.getElementById('buyPassive').textContent = '✅ MAX LEVEL';
+  } else {
+    document.getElementById('passiveCost').textContent = fmt(passiveCost());
+    document.getElementById('buyPassive').disabled     = state.balance < passiveCost();
+    document.getElementById('buyPassive').textContent  = 'Upgrade Passive Mining';
+  }
+
   var badge = document.getElementById('passiveBadge');
-  document.getElementById('passiveRate').textContent = fmt(ph);
-  if(ph>0) badge.classList.remove('hidden'); else badge.classList.add('hidden');
+  if(pph(pl)>0) badge.classList.remove('hidden'); else badge.classList.add('hidden');
+
   document.getElementById('streakDisp').textContent = state.checkinStreak;
   updateCheckinGrid();
   restoreTaskButtons();
-  restoreVerifyButtons();
-  syncManualAddressField();
+  updateProfileTab();
 }
 
 function updateCheckinGrid(){
   var grid = document.getElementById('checkinGrid');
   grid.innerHTML = '';
   var today = new Date().toISOString().split('T')[0];
-  for(var i=1; i<=7; i++){
-    var d = document.createElement('div');
-    d.className = 'checkinDay';
-    var r = Math.min(500+100*i, 3000);
-    d.innerHTML = '<span>D'+i+'</span><span style="font-size:8px;color:var(--green)">+'+(r>=1000?Math.round(r/1000)+'k':r)+'</span>';
-    if(i <= state.checkinStreak) d.classList.add('done');
-    if(i === state.checkinStreak+1) d.classList.add('today');
+  for(var i=1;i<=7;i++){
+    var d=document.createElement('div'); d.className='checkinDay';
+    var rw=Math.min(500+100*i,3000);
+    d.innerHTML='<span>D'+i+'</span><span style="font-size:8px;color:var(--green)">+'+(rw>=1000?Math.round(rw/1000)+'k':rw)+'</span>';
+    if(i<=state.checkinStreak) d.classList.add('done');
+    if(i===state.checkinStreak+1) d.classList.add('today');
     grid.appendChild(d);
   }
-  var btn = document.getElementById('checkinBtn');
-  if(state.lastCheckin === today){ btn.textContent='✅ Revine mâine'; btn.disabled=true; }
+  var btn=document.getElementById('checkinBtn');
+  if(state.lastCheckin===today){ btn.textContent='✅ Revine mâine'; btn.disabled=true; }
   else { btn.textContent='🎁 Revendică Recompensa Zilnică'; btn.disabled=false; }
 }
 
 function restoreTaskButtons(){
-  var tasks = { channel1:'taskBtn_channel1', channel2:'taskBtn_channel2', twitter:'taskBtn_twitter', partner:'taskBtn_partner' };
-  for(var id in tasks){
-    var btn = document.getElementById(tasks[id]);
-    if(btn && state.claimedTasks[id]){ btn.textContent='✅ Revendicat'; btn.disabled=true; }
+  var map={ channel1:'taskBtn_channel1', channel2:'taskBtn_channel2', twitter:'taskBtn_twitter', partner:'taskBtn_partner' };
+  for(var id in map){
+    var btn=document.getElementById(map[id]);
+    if(btn && state.claimedTasks[id]){ btn.textContent='✅ Revendicat'; btn.disabled=true; btn.style.display='inline-block'; }
   }
 }
 
-function showVerifyBtn(e, taskId){
-  var btn = document.getElementById('taskBtn_' + taskId);
-  if(btn){
+function updateProfileTab(){
+  var initial = cu.firstName ? cu.firstName.charAt(0).toUpperCase() : '?';
+  document.getElementById('profileAvatar').textContent   = initial;
+  document.getElementById('profileName').textContent     = cu.firstName || '—';
+  document.getElementById('profileUsername').textContent = '@' + cu.username;
+  document.getElementById('profileBalance').textContent  = fmt(state.balance) + ' ZX';
+  document.getElementById('profileTapLvl').textContent   = state.tapLevel + ' / 20';
+  document.getElementById('profileEnergyLvl').textContent= state.energyLevel + ' / 20';
+  document.getElementById('profilePassiveLvl').textContent= state.passiveLevel + ' / 20';
+  document.getElementById('profileStreak').textContent   = state.checkinStreak + ' zile';
+  document.getElementById('profileReferrals').textContent= state.refCount || 0;
+  document.getElementById('profileTgId').textContent     = cu.id || '—';
+  document.getElementById('profileWallet').textContent   = state.walletAddress ? state.walletAddress.slice(0,10)+'...'+state.walletAddress.slice(-8) : 'Neconectat';
+}
+
+// ─── Verify button show (tasks) ───────────────────────────────────────────────
+window.showVerifyBtn = function(taskId){
+  var btn = document.getElementById('taskBtn_'+taskId);
+  if(btn && !state.claimedTasks[taskId]){
     btn.style.display = 'inline-block';
     state.linkClicked[taskId] = true;
     save();
   }
-}
+};
 
 function restoreVerifyButtons(){
-  var tasks = ['channel1','channel2','twitter','partner'];
-  tasks.forEach(function(id){
+  ['channel1','channel2','twitter','partner'].forEach(function(id){
     var btn = document.getElementById('taskBtn_'+id);
-    if(btn && state.linkClicked && state.linkClicked[id]){
+    if(btn && state.linkClicked[id] && !state.claimedTasks[id]){
       btn.style.display = 'inline-block';
     }
   });
 }
 
-// ─── Sync with server ────────────────────────────────────────────────────────
+// ─── Server sync ─────────────────────────────────────────────────────────────
 var syncT = null;
 function syncNow(immediate){
   if(cu.username==='guest') return;
@@ -1592,79 +1693,87 @@ function syncNow(immediate){
   syncT = setTimeout(function(){
     fetch('/api/sync',{
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ username:cu.username, balance:state.balance,
-        tapLevel:state.tapLevel, energyLevel:state.energyLevel,
-        passiveLevel:state.passiveLevel, telegramId:cu.id })
+      body:JSON.stringify({
+        username:cu.username, firstName:cu.firstName,
+        balance:state.balance, tapLevel:state.tapLevel,
+        energyLevel:state.energyLevel, passiveLevel:state.passiveLevel,
+        telegramId:cu.id
+      })
     }).then(function(r){ return r.json(); }).then(function(d){
-      if(d.balance !== undefined && d.balance !== state.balance){
-        state.balance = d.balance; save(); updateUI();
+      if(d.balance!==undefined && d.balance!==state.balance){
+        state.balance=d.balance; save(); updateUI();
       }
-      if(d.passiveEarned && d.passiveEarned > 0)
+      if(d.passiveEarned && d.passiveEarned>0)
         toast('⚙️ +'+fmt(d.passiveEarned)+' ZX passive', 3000);
     }).catch(function(){});
   }, immediate ? 300 : 1800);
 }
 
-// ─── Coin tap ────────────────────────────────────────────────────────────────
+// ─── Coin tap ─────────────────────────────────────────────────────────────────
 var coin = document.getElementById('coin');
 var lastTap = 0;
 function gainTap(x, y){
-  if(state.energy <= 0){ toast('⚡ Energie epuizată!'); return; }
-  var now = Date.now();
-  if(now - lastTap < 40) return;
-  lastTap = now;
-  var gain = 1 + state.tapLevel;
-  state.balance += gain; state.energy = Math.max(0, state.energy-1);
-  spawnFloat(gain, x, y); save(); updateUI(); syncNow(false);
+  if(state.energy<=0){ toast('⚡ Energie epuizată!'); return; }
+  var now=Date.now();
+  if(now-lastTap<40) return;
+  lastTap=now;
+  var gain=tapGain();
+  state.balance+=gain; state.energy=Math.max(0,state.energy-1);
+  spawnFloat(gain,x,y); save(); updateUI(); syncNow(false);
 }
-function spawnFloat(val, x, y){
-  var el = document.createElement('div');
-  el.className = 'floatGain'; el.textContent = '+'+val;
-  el.style.left = x+'px'; el.style.top = (y-10)+'px';
+function spawnFloat(val,x,y){
+  var el=document.createElement('div');
+  el.className='floatGain'; el.textContent='+'+val;
+  el.style.left=x+'px'; el.style.top=(y-10)+'px';
   document.body.appendChild(el);
-  setTimeout(function(){ el.parentNode && el.parentNode.removeChild(el); }, 800);
+  setTimeout(function(){ el.parentNode&&el.parentNode.removeChild(el); },800);
 }
-coin.addEventListener('touchstart', function(e){
+coin.addEventListener('touchstart',function(e){
   e.preventDefault(); e.stopPropagation();
-  for(var i=0; i<e.changedTouches.length; i++){
-    var t=e.changedTouches[i]; gainTap(t.clientX, t.clientY);
-  }
-}, {passive:false});
-coin.addEventListener('mousedown', function(e){ if(e.button===0) gainTap(e.clientX, e.clientY); });
-coin.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+  for(var i=0;i<e.changedTouches.length;i++){ var t=e.changedTouches[i]; gainTap(t.clientX,t.clientY); }
+},{passive:false});
+coin.addEventListener('mousedown',function(e){ if(e.button===0) gainTap(e.clientX,e.clientY); });
+coin.addEventListener('contextmenu',function(e){ e.preventDefault(); });
 
+// Energy regen
 setInterval(function(){
-  if(state.energy < state.maxEnergy){ state.energy = Math.min(state.maxEnergy, state.energy+1); save(); updateUI(); }
-}, 3000);
+  if(state.energy<state.maxEnergy){ state.energy=Math.min(state.maxEnergy,state.energy+1); save(); updateUI(); }
+},3000);
 
-// ─── Tabs ────────────────────────────────────────────────────────────────────
-var TABS = ['generator','tasks','referral','wallet','rank'];
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
+var TABS=['generator','tasks','referral','wallet','rank','profile'];
 document.querySelectorAll('.tabBtn').forEach(function(btn){
-  btn.addEventListener('click', function(){
-    var tab = btn.dataset.tab;
+  btn.addEventListener('click',function(){
+    var tab=btn.dataset.tab;
     document.querySelectorAll('.tabBtn').forEach(function(b){ b.classList.remove('active'); });
     btn.classList.add('active');
     TABS.forEach(function(id){ document.getElementById(id+'Tab').classList.add('hidden'); });
     document.getElementById(tab+'Tab').classList.remove('hidden');
     if(tab==='rank') loadLeaderboard();
     if(tab==='referral') loadReferral();
+    if(tab==='profile') updateProfileTab();
     syncNow(true);
   });
 });
 
 // ─── Upgrades ────────────────────────────────────────────────────────────────
-document.getElementById('buyTap').addEventListener('click', function(){
+document.getElementById('buyTap').addEventListener('click',function(){
+  if(state.tapLevel>=MAX_LVL) return;
   var c=tapCost(); if(state.balance<c) return;
   state.balance-=c; state.tapLevel++; save(); updateUI(); syncNow(true);
-  toast('👆 Multitap Lv.'+state.tapLevel+' — +'+(1+state.tapLevel)+' ZX/tap');
+  toast('👆 Multitap Lv.'+state.tapLevel+' → +'+tapGain()+' ZX/tap');
 });
-document.getElementById('buyEnergy').addEventListener('click', function(){
+document.getElementById('buyEnergy').addEventListener('click',function(){
+  if(state.energyLevel>=MAX_LVL) return;
   var c=energyCost(); if(state.balance<c) return;
-  state.balance-=c; state.energyLevel++; state.maxEnergy+=500; state.energy=state.maxEnergy;
+  state.balance-=c; state.energyLevel++;
+  state.maxEnergy=calcMaxEnergy(state.energyLevel);
+  state.energy=state.maxEnergy;
   save(); updateUI(); syncNow(true);
   toast('⚡ Max energie: '+state.maxEnergy);
 });
-document.getElementById('buyPassive').addEventListener('click', function(){
+document.getElementById('buyPassive').addEventListener('click',function(){
+  if(state.passiveLevel>=MAX_LVL) return;
   var c=passiveCost(); if(state.balance<c) return;
   state.balance-=c; state.passiveLevel++; save(); updateUI(); syncNow(true);
   toast('⚙️ Passive Mining Lv.'+state.passiveLevel+' → '+fmt(pph(state.passiveLevel))+' ZX/oră');
@@ -1672,13 +1781,13 @@ document.getElementById('buyPassive').addEventListener('click', function(){
 
 // ─── Recharge modal ──────────────────────────────────────────────────────────
 var adCount=0;
-document.getElementById('rechargeBtn').addEventListener('click', function(){
+document.getElementById('rechargeBtn').addEventListener('click',function(){
   adCount=0;
   document.getElementById('adCounter').textContent='0/3';
   document.getElementById('adProgress').style.width='0%';
   document.getElementById('rechargeModal').style.display='flex';
 });
-document.getElementById('watchRechargeAd').addEventListener('click', function(){
+document.getElementById('watchRechargeAd').addEventListener('click',function(){
   if(window._adsgramController){
     document.getElementById('rechargeModal').style.display='none';
     window._adsgramController.show().then(function(){
@@ -1693,269 +1802,208 @@ document.getElementById('watchRechargeAd').addEventListener('click', function(){
     if(adCount>=3){ state.energy=state.maxEnergy; save(); updateUI(); document.getElementById('rechargeModal').style.display='none'; toast('⚡ Energie restaurată!'); syncNow(true); }
   }
 });
-document.getElementById('closeRecharge').addEventListener('click', function(){ document.getElementById('rechargeModal').style.display='none'; });
+document.getElementById('closeRecharge').addEventListener('click',function(){ document.getElementById('rechargeModal').style.display='none'; });
 
-// ─── ADSGRAM (cu cooldown de 5 minute) ──────────────────────────────────────
+// ─── Adsgram (NO cooldown) ────────────────────────────────────────────────────
 function initAdsgram(){
-  if(!cfg.adsgramBlockId || cfg.adsgramBlockId==='your-adsgram-block-id') return;
-  if(typeof window.Adsgram === 'undefined'){
-    console.warn('Adsgram library not loaded');
-    return;
-  }
-  window._adsgramController = window.Adsgram.init({ blockId: cfg.adsgramBlockId });
+  if(!cfg.adsgramBlockId||cfg.adsgramBlockId==='your-adsgram-block-id') return;
+  if(typeof window.Adsgram==='undefined'){ console.warn('Adsgram not loaded'); return; }
+  window._adsgramController=window.Adsgram.init({ blockId:cfg.adsgramBlockId });
 }
 
-var adCooldownTimer = null;
-
-document.getElementById('watchAdBtn').addEventListener('click', function(){
+document.getElementById('watchAdBtn').addEventListener('click',function(){
   if(cu.username==='guest'){ toast('⚠️ Autentifică-te prin Telegram!'); return; }
-  if(this.disabled) return;
-
   if(!window._adsgramController){
-    state.balance += (cfg.rewardAd || 1000);
-    save(); updateUI(); syncNow(true);
-    toast('+'+fmt(cfg.rewardAd||1000)+' ZX (mod dev)');
+    // Dev fallback
+    state.balance+=(cfg.rewardAd||1000); save(); updateUI(); syncNow(true);
+    toast('+'+fmt(cfg.rewardAd||1000)+' ZX (dev)');
     return;
   }
-
-  var loading = document.getElementById('adLoading');
+  var loading=document.getElementById('adLoading');
   loading.classList.add('show');
-
   window._adsgramController.show().then(function(){
     loading.classList.remove('show');
-    fetch('/api/ad-reward', {
+    fetch('/api/ad-reward',{
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({ username:cu.username, telegramId:cu.id, blockId:cfg.adsgramBlockId })
     }).then(function(r){ return r.json(); }).then(function(d){
-      if(d.success){
-        state.balance = d.balance; save(); updateUI();
-        toast(d.message || '+'+fmt(d.reward)+' ZX!');
-        startAdCooldown(d.cooldown || 300);
-      } else {
-        toast(d.message || 'Eroare.');
-        if(d.cooldown) startAdCooldown(d.cooldown);
-      }
-    }).catch(function(){
-      state.balance += (cfg.rewardAd||1000); save(); updateUI();
-      toast('+'+fmt(cfg.rewardAd||1000)+' ZX!');
-    });
+      if(d.success){ state.balance=d.balance; save(); updateUI(); toast(d.message||'+'+fmt(d.reward)+' ZX!'); }
+      else { toast(d.message||'Eroare.'); }
+    }).catch(function(){ state.balance+=(cfg.rewardAd||1000); save(); updateUI(); toast('+'+fmt(cfg.rewardAd||1000)+' ZX!'); });
   }).catch(function(err){
     loading.classList.remove('show');
-    if(err && err.error){ toast('ℹ️ Reclame indisponibile momentan.'); }
+    if(err&&err.error) toast('ℹ️ Reclame indisponibile momentan.');
   });
 });
 
-function startAdCooldown(seconds){
-  var btn = document.getElementById('watchAdBtn');
-  btn.disabled = true;
-  var remaining = seconds;
-  var originalText = btn.textContent;
-  btn.textContent = remaining + 's';
-
-  clearInterval(adCooldownTimer);
-  adCooldownTimer = setInterval(function(){
-    remaining--;
-    if(remaining <= 0){
-      clearInterval(adCooldownTimer);
-      btn.textContent = originalText;
-      btn.disabled = false;
-    } else {
-      btn.textContent = remaining + 's';
-    }
-  }, 1000);
-}
-
-// ─── TASKS ───────────────────────────────────────────────────────────────────
-function claimTask(taskId, btn){
+// ─── Tasks ────────────────────────────────────────────────────────────────────
+window.claimTask = function(taskId, btn){
   if(cu.username==='guest'){ toast('⚠️ Autentifică-te prin Telegram!'); return; }
   if(state.claimedTasks[taskId]){ toast('Deja revendicat.'); return; }
-  btn.disabled = true; btn.textContent = '⏳...';
-  fetch('/api/task/claim', {
+  btn.disabled=true; btn.textContent='⏳...';
+  fetch('/api/task/claim',{
     method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({ username:cu.username, telegramId:cu.id, taskId:taskId })
   }).then(function(r){ return r.json(); }).then(function(d){
     if(d.success){
-      state.claimedTasks[taskId] = true;
-      state.balance = d.balance; save(); updateUI();
-      btn.textContent = '✅ Revendicat'; btn.disabled = true;
-      toast(d.message || '+'+fmt(d.reward)+' ZX!');
+      state.claimedTasks[taskId]=true; state.balance=d.balance; save(); updateUI();
+      btn.textContent='✅ Revendicat'; btn.disabled=true;
+      toast(d.message||'+'+fmt(d.reward)+' ZX!');
     } else {
-      btn.textContent = 'Verifică'; btn.disabled = false;
-      toast(d.message || 'Eroare.');
+      btn.textContent='Verifică ✓'; btn.disabled=false;
+      toast(d.message||'Eroare.');
     }
-  }).catch(function(){
-    btn.textContent = 'Verifică'; btn.disabled = false;
-    toast('❌ Eroare conexiune.');
-  });
-}
+  }).catch(function(){ btn.textContent='Verifică ✓'; btn.disabled=false; toast('❌ Eroare conexiune.'); });
+};
 
-// ─── Daily check-in ──────────────────────────────────────────────────────────
-document.getElementById('checkinBtn').addEventListener('click', function(){
+// ─── Check-in ────────────────────────────────────────────────────────────────
+document.getElementById('checkinBtn').addEventListener('click',function(){
   if(cu.username==='guest'){ toast('⚠️ Autentifică-te prin Telegram!'); return; }
   fetch('/api/checkin',{
     method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({ username:cu.username, telegramId:cu.id })
   }).then(function(r){ return r.json(); }).then(function(d){
     if(d.success){
-      state.balance += d.reward; state.checkinStreak=d.streak;
-      state.lastCheckin = new Date().toISOString().split('T')[0];
+      state.balance+=d.reward; state.checkinStreak=d.streak;
+      state.lastCheckin=new Date().toISOString().split('T')[0];
       save(); updateUI(); toast('🎁 '+d.message);
     } else { toast(d.message||'Deja ai check-in azi!'); }
   }).catch(function(){ toast('❌ Eroare.'); });
 });
 
-// ─── Referral ────────────────────────────────────────────────────────────────
+// ─── Referral ─────────────────────────────────────────────────────────────────
 function loadReferral(){
   if(cu.username==='guest'){ document.getElementById('myRefCode').textContent='GUEST'; return; }
   fetch('/api/referral?username='+encodeURIComponent(cu.username)+'&telegramId='+cu.id)
   .then(function(r){ return r.json(); }).then(function(d){
-    state.referralCode = d.code||'';
-    document.getElementById('myRefCode').textContent = d.code||'—';
-    document.getElementById('refCount').textContent = (d.referrals||[]).length;
-    document.getElementById('refEarnings').textContent = fmt(d.earnings||0)+' ZX';
+    state.referralCode=d.code||''; state.refCount=(d.referrals||[]).length;
+    document.getElementById('myRefCode').textContent=d.code||'—';
+    document.getElementById('refCount').textContent=(d.referrals||[]).length;
+    document.getElementById('refEarnings').textContent=fmt(d.earnings||0)+' ZX';
     save();
   }).catch(function(){});
 }
 
-document.getElementById('copyRefLink').addEventListener('click', function(){
+document.getElementById('copyRefLink').addEventListener('click',function(){
   if(!state.referralCode){ loadReferral(); toast('Se generează...'); return; }
-  var botName = 'ZXNetworkBot';
-  var link = 'https://t.me/'+botName+'?start=ref_'+state.referralCode;
+  var botName='ZXNetworkBot';
+  var link='https://t.me/'+botName+'?start=ref_'+state.referralCode;
   if(navigator.clipboard){ navigator.clipboard.writeText(link).then(function(){ toast('📋 Link copiat!'); }); }
   else { toast('Cod: '+state.referralCode); }
 });
 
-document.getElementById('claimRef').addEventListener('click', function(){
+document.getElementById('claimRef').addEventListener('click',function(){
   if(cu.username==='guest'){ toast('⚠️ Autentifică-te prin Telegram!'); return; }
   if(state.referredByDone){ toast('Ai folosit deja un cod.'); return; }
-  var code = document.getElementById('refInput').value.trim().toUpperCase();
-  if(code.length < 8){ toast('Cod invalid.'); return; }
+  var code=document.getElementById('refInput').value.trim().toUpperCase();
+  if(code.length<8){ toast('Cod invalid.'); return; }
   fetch('/api/referral/claim',{
     method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({ username:cu.username, referralCode:code, telegramId:cu.id })
   }).then(function(r){ return r.json(); }).then(function(d){
-    var el = document.getElementById('refStatus');
-    el.textContent = d.message||''; el.style.color = d.success?'#00ff87':'#ff6b6b';
+    var el=document.getElementById('refStatus');
+    el.textContent=d.message||''; el.style.color=d.success?'#00ff87':'#ff6b6b';
     if(d.success){ state.balance+=(d.reward||1000); state.referredByDone=true; save(); updateUI(); syncNow(true); }
   }).catch(function(){ toast('❌ Eroare.'); });
 });
 
-// ─── TON CONNECT + manual wallet ─────────────────────────────────────────────
-function syncManualAddressField(){
-  var input = document.getElementById('manualWalletInput');
-  if(input && state.walletAddress){
-    input.value = state.walletAddress;
-  }
-}
-
+// ─── TON Connect ─────────────────────────────────────────────────────────────
 function updateWalletUI(address){
-  var addrDisp = document.getElementById('tonAddrDisplay');
-  addrDisp.textContent = address;
-  addrDisp.classList.remove('hidden');
+  document.getElementById('tonAddrDisplay').textContent=address;
+  document.getElementById('tonAddrDisplay').classList.remove('hidden');
   document.getElementById('walletDot').classList.add('connected');
-  document.getElementById('walletStatusTxt').textContent = 'Wallet conectat ✅';
-  document.getElementById('tonBalanceRow').classList.remove('hidden');
-  state.walletAddress = address;
-  save();
-  syncManualAddressField();
+  document.getElementById('walletStatusTxt').textContent='Wallet conectat ✅';
+  document.getElementById('tonSavedRow').classList.remove('hidden');
+  state.walletAddress=address; save(); updateProfileTab();
 }
 
 function initTonConnect(){
-  if(typeof TonConnectUI === 'undefined') return;
-  var manifestUrl = (cfg.appUrl||'')+'/tonconnect-manifest.json';
-
-  var tonConnect;
+  if(typeof TonConnectUI==='undefined') return;
+  var manifestUrl=(cfg.appUrl||'')+'/tonconnect-manifest.json';
+  var tc;
   try{
-    tonConnect = new TonConnectUI({
-      manifestUrl: manifestUrl,
-      buttonRootId: 'ton-connect-btn',
-      actionsConfiguration: {
-        returnStrategy: 'back'
-      }
-    });
-  } catch(e){ return; }
+    tc=new TonConnectUI({ manifestUrl:manifestUrl, buttonRootId:'ton-connect-btn', actionsConfiguration:{ returnStrategy:'back' } });
+  }catch(e){ return; }
 
-  tonConnect.onStatusChange(function(wallet){
+  tc.onStatusChange(function(wallet){
     if(wallet){
-      var addr = wallet.account.address;
+      var addr=wallet.account.address;
       updateWalletUI(addr);
-      if(cu.username !== 'guest'){
+      if(cu.username!=='guest'){
         fetch('/api/wallet/save',{
           method:'POST', headers:{'Content-Type':'application/json'},
           body:JSON.stringify({ username:cu.username, telegramId:cu.id, address:addr })
         }).then(function(r){ return r.json(); }).then(function(d){
-          if(d.success) toast('🔗 Adresă TON salvată: '+addr.slice(0,8)+'...');
+          if(d.success) toast('🔗 Wallet TON conectat: '+addr.slice(0,8)+'...');
         }).catch(function(){});
       }
     } else {
       document.getElementById('walletDot').classList.remove('connected');
-      document.getElementById('walletStatusTxt').textContent = 'Wallet neconectat';
+      document.getElementById('walletStatusTxt').textContent='Wallet neconectat';
       document.getElementById('tonAddrDisplay').classList.add('hidden');
-      document.getElementById('tonBalanceRow').classList.add('hidden');
-      state.walletAddress = ''; save();
-      syncManualAddressField();
+      document.getElementById('tonSavedRow').classList.add('hidden');
+      state.walletAddress=''; save(); updateProfileTab();
     }
   });
 
-  if(state.walletAddress){
-    updateWalletUI(state.walletAddress);
-  }
+  // Restore if already connected previously
+  if(state.walletAddress) updateWalletUI(state.walletAddress);
 }
-
-document.getElementById('manualSaveWallet').addEventListener('click', function(){
-  var addr = document.getElementById('manualWalletInput').value.trim();
-  if(!addr){ toast('Introdu o adresă validă.'); return; }
-  updateWalletUI(addr);
-  if(cu.username !== 'guest'){
-    fetch('/api/wallet/save',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ username:cu.username, telegramId:cu.id, address:addr })
-    }).then(function(r){ return r.json(); }).then(function(d){
-      if(d.success) toast('Adresă salvată!');
-    }).catch(function(){});
-  }
-  toast('Adresă salvată manual ✅');
-});
 
 // ─── Leaderboard ─────────────────────────────────────────────────────────────
 function loadLeaderboard(){
-  var board = document.getElementById('leaderboard');
-  board.innerHTML = '<div style="color:var(--muted);text-align:center;padding:16px">Se încarcă...</div>';
+  var board=document.getElementById('leaderboard');
+  board.innerHTML='<div style="color:var(--muted);text-align:center;padding:16px">Se încarcă...</div>';
   fetch('/api/leaderboard').then(function(r){ return r.json(); }).then(function(entries){
-    board.innerHTML = '';
+    board.innerHTML='';
     if(!entries||!entries.length){ board.innerHTML='<div style="color:var(--muted);text-align:center;padding:20px">Niciun jucător înregistrat.</div>'; return; }
     var medals=['🥇','🥈','🥉'];
     var myRank='-';
     entries.forEach(function(e,i){
-      var isMe = e.username===cu.username;
+      var isMe=e.username===cu.username;
       if(isMe) myRank='#'+(i+1);
-      var d = document.createElement('div');
-      d.className='leaderboardItem';
+      // Show firstName if available, fallback to username
+      var displayName = e.firstName && e.firstName !== e.username ? e.firstName : e.username;
+      var d=document.createElement('div'); d.className='leaderboardItem';
       d.innerHTML='<span class="leaderboardRank">'+(medals[i]||'#'+(i+1))+'</span>'+
-        '<span class="leaderboardName" style="'+(isMe?'color:#00ff87;font-weight:900;':'')+'">'+(isMe?e.username+' ◀':e.username)+'</span>'+
+        '<span class="leaderboardName" style="'+(isMe?'color:#00ff87;font-weight:900;':'')+'">'+(isMe?displayName+' ◀':displayName)+'</span>'+
         '<span class="leaderboardBalance">'+fmt(e.balance)+' ZX</span>';
       board.appendChild(d);
     });
-    document.getElementById('myRank').textContent = myRank;
-    document.getElementById('myBalanceRank').textContent = fmt(state.balance)+' ZX';
-  }).catch(function(){
-    board.innerHTML='<div style="color:#ff6b6b;text-align:center">Eroare.</div>';
-  });
+    document.getElementById('myRank').textContent=myRank;
+    document.getElementById('myBalanceRank').textContent=fmt(state.balance)+' ZX';
+  }).catch(function(){ board.innerHTML='<div style="color:#ff6b6b;text-align:center">Eroare.</div>'; });
 }
 
-// ─── Delete local data ───────────────────────────────────────────────────────
-document.getElementById('deleteAccountBtn').addEventListener('click', function(){
-  if(!confirm('Ștergi datele locale? Progresul pe server rămâne.')) return;
-  localStorage.removeItem(SK); location.reload();
+// ─── Delete account ───────────────────────────────────────────────────────────
+document.getElementById('deleteAccountBtn').addEventListener('click',function(){
+  if(!confirm('Ești sigur? Aceasta șterge COMPLET contul de pe server. Nu se poate recupera.')) return;
+  if(!confirm('Confirmi ștergerea permanentă a contului '+cu.firstName+'?')) return;
+  if(cu.username!=='guest'){
+    fetch('/api/account/delete',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ username:cu.username, telegramId:cu.id })
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.success){
+        localStorage.removeItem(SK);
+        toast('Cont șters. La revedere!', 3000);
+        setTimeout(function(){ location.reload(); }, 3000);
+      }
+    }).catch(function(){
+      localStorage.removeItem(SK); location.reload();
+    });
+  } else {
+    localStorage.removeItem(SK); location.reload();
+  }
 });
 
-// ─── Init ────────────────────────────────────────────────────────────────────
+// ─── Init ─────────────────────────────────────────────────────────────────────
 updateUI();
 if(cu.username!=='guest'){
   setTimeout(function(){ syncNow(true); }, 600);
   fetch('/api/passive?username='+encodeURIComponent(cu.username))
   .then(function(r){ return r.json(); })
-  .then(function(d){ if(d.earned&&d.earned>0) toast('⚙️ Offline mining: +'+fmt(d.earned)+' ZX!', 4000); })
+  .then(function(d){ if(d.earned&&d.earned>0) toast('⚙️ Offline: +'+fmt(d.earned)+' ZX!', 4000); })
   .catch(function(){});
 }
 
@@ -1997,6 +2045,7 @@ func main() {
 	http.HandleFunc("/api/ad-reward",       handleAdsgramReward)
 	http.HandleFunc("/api/wallet/save",     handleWalletSave)
 	http.HandleFunc("/api/config",          handleAppConfig)
+	http.HandleFunc("/api/account/delete",  handleDeleteAccount)
 	http.HandleFunc("/tonconnect-manifest.json", handleTonManifest)
 	http.HandleFunc("/webhook",             handleWebhook)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -2005,7 +2054,9 @@ func main() {
 	})
 
 	port := os.Getenv("PORT")
-	if port == "" { port = "8080" }
+	if port == "" {
+		port = "8080"
+	}
 	log.Printf("🚀 ZX Network pe portul %s | %d jucători", port, len(db.Players))
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
