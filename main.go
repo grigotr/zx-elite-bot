@@ -150,7 +150,19 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if update.Message != nil && update.Message.Text == "/start" {
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "ZX WebApp is live")
+		// Construim un buton WebApp inline
+		webAppURL := os.Getenv("WEBAPP_URL")
+		if webAppURL == "" {
+			// Fallback – trebuie să înlocuiești cu adresa ta reală de Render
+			webAppURL = "https://numele-aplicatiei-tale.onrender.com"
+		}
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonWebApp("🎮 Joacă ZX Network", tgbotapi.WebAppInfo{Url: webAppURL}),
+			),
+		)
+		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Apasă butonul de mai jos pentru a juca:")
+		msg.ReplyMarkup = keyboard
 		bot.Send(msg)
 	}
 }
@@ -496,36 +508,30 @@ body::before{
 <script>
 var currentUser = { id: 'guest', name: 'Guest' };
 
-// Inițializare Telegram cu depanare avansată
 (function() {
-  var debugInfo = 'Telegram.WebApp: ' + (window.Telegram && window.Telegram.WebApp ? 'disponibil' : 'lipsă') + '\n';
   if (window.Telegram && window.Telegram.WebApp) {
     var tg = window.Telegram.WebApp;
     tg.ready();
-    debugInfo += 'initDataUnsafe: ' + JSON.stringify(tg.initDataUnsafe, null, 2) + '\n';
     var userData = tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
-    if (userData) {
+    if (userData && userData.id) {
       currentUser.id = String(userData.id);
       currentUser.name = userData.first_name || 'Player';
       if (userData.last_name) {
         currentUser.name += ' ' + userData.last_name;
       }
-      debugInfo += 'Nume extras: ' + currentUser.name;
-    } else {
-      debugInfo += '⚠️ Nu există user în initDataUnsafe. Verifică: ai apăsat butonul WebApp? URL-ul din BotFather corespunde?';
     }
-  } else {
-    debugInfo += 'Nu rulează în WebView-ul Telegram. Ai deschis aplicația din browser?';
   }
 
-  // Afișează numele (sau Guest)
   document.getElementById('telegramUser').innerText = currentUser.name;
 
-  // Afișează fereastra de depanare doar dacă numele e Guest
+  // Depanare doar dacă numele a rămas Guest
   if (currentUser.name === 'Guest') {
     setTimeout(function() {
-      alert('🔍 Depanare conectare Telegram:\n\n' + debugInfo);
-    }, 800);
+      alert('⚠️ Nu s-a putut prelua numele.\n\n' +
+            'Telegram.WebApp: ' + (window.Telegram && window.Telegram.WebApp ? 'disponibil' : 'lipsă') + '\n' +
+            'Probabil nu ai deschis aplicația prin butonul WebApp.\n' +
+            'Asigură-te că apeși pe butonul "🎮 Joacă ZX Network" din chat-ul botului.');
+    }, 500);
   }
 })();
 
