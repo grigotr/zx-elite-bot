@@ -238,6 +238,17 @@ body::before{
  transition: transform .12s ease;
 }
 .coin:active{ transform:scale(.94); }
+
+/* Împiedică selectarea și zoom-ul nedorit pe monedă */
+.coin, svg, img {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
 .energyRow{
  margin-top:24px;
  display:flex;
