@@ -496,31 +496,36 @@ body::before{
 <script>
 var currentUser = { id: 'guest', name: 'Guest' };
 
-// Inițializare Telegram
+// Inițializare Telegram cu depanare avansată
 (function() {
+  var debugInfo = 'Telegram.WebApp: ' + (window.Telegram && window.Telegram.WebApp ? 'disponibil' : 'lipsă') + '\n';
   if (window.Telegram && window.Telegram.WebApp) {
     var tg = window.Telegram.WebApp;
     tg.ready();
+    debugInfo += 'initDataUnsafe: ' + JSON.stringify(tg.initDataUnsafe, null, 2) + '\n';
     var userData = tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
-    if (userData && userData.id) {
+    if (userData) {
       currentUser.id = String(userData.id);
       currentUser.name = userData.first_name || 'Player';
       if (userData.last_name) {
         currentUser.name += ' ' + userData.last_name;
       }
+      debugInfo += 'Nume extras: ' + currentUser.name;
+    } else {
+      debugInfo += '⚠️ Nu există user în initDataUnsafe. Verifică: ai apăsat butonul WebApp? URL-ul din BotFather corespunde?';
     }
+  } else {
+    debugInfo += 'Nu rulează în WebView-ul Telegram. Ai deschis aplicația din browser?';
   }
 
-  // Afișează numele
+  // Afișează numele (sau Guest)
   document.getElementById('telegramUser').innerText = currentUser.name;
 
-  // Debug: arată un mesaj dacă nu suntem în Telegram
+  // Afișează fereastra de depanare doar dacă numele e Guest
   if (currentUser.name === 'Guest') {
     setTimeout(function() {
-      alert('⚠️ Nu ești conectat prin Telegram!\n\n' +
-            'Deschide aplicația prin butonul "🎮 Joacă ZX Network" din chat-ul botului.\n\n' +
-            'Dacă nu vezi butonul, configurează-l în BotFather cu /setmenubutton.');
-    }, 500);
+      alert('🔍 Depanare conectare Telegram:\n\n' + debugInfo);
+    }, 800);
   }
 })();
 
@@ -749,25 +754,19 @@ updateUI();
 func main() {
 	token := "8744648391:AAHbsnd54wrv686PkLCbtj4ueBm4DqEB4vQ"
 
-	// Inițializare bot
 	var err error
 	bot, err = tgbotapi.NewBotAPI(token)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Încarcă datele salvate
 	loadPlayers()
 
-	// Endpoint-uri API
 	http.HandleFunc("/api/update", handleUpdate)
 	http.HandleFunc("/api/delete", handleDelete)
 	http.HandleFunc("/api/leaderboard", handleLeaderboard)
-
-	// Webhook endpoint
 	http.HandleFunc("/webhook", handleWebhook)
 
-	// Servește aplicația
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(webAppHTML))
