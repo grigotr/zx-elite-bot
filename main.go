@@ -34,7 +34,6 @@ var (
 	bot       *tgbotapi.BotAPI
 )
 
-// Anti-cheat: creșterea nu poate depăși 100 puncte/secundă în mod real
 func validateBalanceIncrease(user string, newBalance int) int {
 	playersMu.Lock()
 	defer playersMu.Unlock()
@@ -59,18 +58,17 @@ func validateBalanceIncrease(user string, newBalance int) int {
 	}
 
 	elapsed := now.Sub(state.LastSync).Seconds()
-	// Oferim o marjă de minim 1 secundă pentru a evita erorile la prima sincronizare rapidă
 	if elapsed < 1.0 {
 		elapsed = 1.0
 	}
-	
-	maxIncrease := int(elapsed * 120) // 120 puncte/secundă maxim permis structural (marjă pentru upgrade-uri)
+
+	maxIncrease := int(elapsed * 120)
 	increase := newBalance - state.LastBalance
-	
+
 	if increase > maxIncrease {
 		increase = maxIncrease
 	}
-	
+
 	state.Balance = state.LastBalance + increase
 	state.LastBalance = state.Balance
 	state.LastSync = now
@@ -138,7 +136,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if update.Message != nil && update.Message.Text == "/start" {
 		webAppURL := os.Getenv("WEBAPP_URL")
 		if webAppURL == "" {
-			webAppURL = "https://your-app.onrender.com" 
+			webAppURL = "https://your-app.onrender.com"
 		}
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
@@ -243,7 +241,6 @@ body::before{
 }
 .coinArea{ display:flex; flex-direction:column; align-items:center; justify-content:center; margin-top: 15px; }
 
-/* Protecție totală împotriva selecțiilor albastre, bug-urilor de zoom și input */
 .coin {
  width:245px;
  height:245px;
@@ -540,7 +537,6 @@ function formatNumber(v) {
   return Number(v).toLocaleString('ro-RO');
 }
 
-// Sistem de de-bouncing (Prevenire spam server): Trimite datele doar la 1.5s de la oprirea click-urilor
 var syncTimeout = null;
 function syncWithServer() {
   if (currentUser.username === 'guest') return;
@@ -610,7 +606,9 @@ function updateUI() {
   document.getElementById('buyEnergyUpgrade').disabled = state.balance < getEnergyUpgradeCost();
 }
 
+// Corectare formule cost fără erori de formatare
 function getTapUpgradeCost() { return 1000 * Math.pow(state.tapLevel + 1, 2); }
+// Corectare formule cost fără erori de formatare
 function getEnergyUpgradeCost() { return 2500 * Math.pow(state.energyLevel + 1, 2); }
 
 function gainTap(event) {
@@ -620,7 +618,6 @@ function gainTap(event) {
   state.balance += gain;
   state.energy -= 1;
   
-  // Coordonate precise pentru floating text independent de platformă
   var rect = document.getElementById('coin').getBoundingClientRect();
   var x, y;
   if (event.clientX && event.clientY) {
@@ -650,7 +647,6 @@ function spawnFloat(value, posX, posY) {
   setTimeout(function() { el.remove(); }, 850);
 }
 
-// Securizarea și optimizarea mecanismului de atingere (Elimină selecția și întârzierile)
 var coin = document.getElementById('coin');
 coin.addEventListener('touchstart', function(e) {
   e.preventDefault();
@@ -674,7 +670,6 @@ document.querySelectorAll('.tabBtn').forEach(function(btn) {
     document.getElementById('rankTab').classList.add('hidden');
     document.getElementById(tab + 'Tab').classList.remove('hidden');
     
-    // Forțează sincronizarea imediată când utilizatorul navighează
     if (currentUser.username !== 'guest') {
       fetch('/api/sync', {
         method: 'POST',
@@ -695,7 +690,6 @@ function claimTask(id, reward, btn) {
   saveState();
   updateUI();
   
-  // Sincronizare forțată instantă pentru Task-uri
   if (currentUser.username !== 'guest') {
     fetch('/api/sync', {
       method: 'POST',
@@ -725,7 +719,6 @@ document.getElementById('connectWallet').addEventListener('click', function() {
   syncWithServer();
 });
 
-// Restaurare stare wallet la reîncărcare
 if(state.walletConnected && state.walletAddress !== '') {
   document.getElementById('walletAddress').style.display = 'block';
   document.getElementById('walletAddress').innerText = state.walletAddress;
@@ -792,7 +785,7 @@ func main() {
 	var err error
 	bot, err = tgbotapi.NewBotAPI(token)
 	if err != nil {
-		log.Println("⚠️ Telegram Bot Token-ul nu este valid sau lipsește conexiunea:", err)
+		log.Println("⚠️ Status Bot:", err)
 	}
 
 	http.HandleFunc("/api/sync", handleSync)
@@ -809,6 +802,6 @@ func main() {
 		port = "8080"
 	}
 
-	log.Println("🚀 Core-ul ZX Network este complet optimizat și pornit pe portul " + port)
+	log.Println("🚀 Core-ul ZX Network pornește pe portul " + port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
