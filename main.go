@@ -707,14 +707,14 @@ func handleAdsgramReward(w http.ResponseWriter, r *http.Request) {
 	p := getOrCreatePlayer(req.Username, req.TelegramID)
 
 	// ⏱️ Verificare cooldown 5 minute
-	if time.Since(p.LastAdWatch) < 5*time.Minute {
-		remaining := int(5*time.Minute - time.Since(p.LastAdWatch).Seconds())
-		bal := p.Balance
+	remainingDuration := 5*time.Minute - time.Since(p.LastAdWatch)
+	if remainingDuration > 0 {
+		remainingSeconds := int(remainingDuration.Seconds())
 		db.mu.Unlock()
 		jsonResp(w, map[string]interface{}{
 			"success":  false,
-			"message":  fmt.Sprintf("⏳ Reclama disponibilă în %d secunde.", remaining),
-			"cooldown": remaining,
+			"message":  fmt.Sprintf("⏳ Reclama disponibilă în %d secunde.", remainingSeconds),
+			"cooldown": remainingSeconds,
 		})
 		return
 	}
@@ -722,14 +722,13 @@ func handleAdsgramReward(w http.ResponseWriter, r *http.Request) {
 	p.LastAdWatch = time.Now()
 	p.Balance += REWARD_WATCH_AD
 	p.LastBalance = p.Balance
-	bal := p.Balance
 	db.mu.Unlock()
 	scheduleSave()
 
 	jsonResp(w, map[string]interface{}{
 		"success":  true,
 		"reward":   REWARD_WATCH_AD,
-		"balance":  bal,
+		"balance":  p.Balance,
 		"message":  fmt.Sprintf("+%s ZX din reclamă!", formatInt(REWARD_WATCH_AD)),
 		"cooldown": 300, // 5 minute
 	})
