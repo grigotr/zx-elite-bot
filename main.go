@@ -919,9 +919,7 @@ const webAppHTML = `<!DOCTYPE html>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>ZX Network</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<!-- TON Connect UI -->
 <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
-<!-- ADSGRAM script – obligatoriu pentru reclame reale -->
 <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
 <style>
 :root{
@@ -1075,7 +1073,6 @@ body::before{
   white-space:nowrap; max-width:90vw; text-align:center;
 }
 .toast.show{ opacity:1; }
-/* TON Connect button container */
 #ton-connect-btn{ display:block; }
 .ton-wallet-card{
   background:rgba(0,152,234,.08); border:1px solid rgba(0,152,234,.25);
@@ -1089,7 +1086,7 @@ body::before{
 .wallet-status{ display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:12px; }
 .wallet-dot{ width:8px; height:8px; border-radius:50%; background:#666; }
 .wallet-dot.connected{ background:var(--green); box-shadow:0 0 6px var(--green); }
-/* Adsgram loading overlay */
+.manual-wallet{ margin-top:16px; }
 .ad-loading{
   display:none; position:fixed; inset:0; background:rgba(0,0,0,.7);
   backdrop-filter:blur(8px); z-index:9000; align-items:center; justify-content:center;
@@ -1106,14 +1103,12 @@ body::before{
 <body>
 <div id="toastEl" class="toast"></div>
 
-<!-- Ad loading overlay -->
 <div id="adLoading" class="ad-loading">
   <div class="ad-spinner"></div>
   <div style="color:var(--muted);font-size:13px;">Se încarcă reclama...</div>
 </div>
 
 <div class="app">
-<!-- HEADER -->
 <header class="header">
   <div class="userBox">
     <div class="userLabel">User Core</div>
@@ -1124,7 +1119,7 @@ body::before{
 
 <div class="page">
 
-<!-- ════════ GENERATOR TAB ════════ -->
+<!-- GENERATOR TAB -->
 <div id="generatorTab" class="section">
   <div class="balance-container">
     <div class="balanceTitle">Total ZX Tokens</div>
@@ -1202,11 +1197,10 @@ body::before{
   </div>
 </div>
 
-<!-- ════════ TASKS TAB ════════ -->
+<!-- TASKS TAB -->
 <div id="tasksTab" class="section hidden">
   <div class="sectionTitle">💼 Tasks & Misiuni</div>
 
-  <!-- Daily check-in -->
   <div class="referralBox" style="margin-bottom:14px">
     <div class="upgradeTitle">📅 Daily Check-in</div>
     <div style="font-size:12px;color:var(--muted);margin:6px 0 10px">
@@ -1216,7 +1210,6 @@ body::before{
     <button id="checkinBtn" class="btn" style="width:100%;margin-top:14px">🎁 Revendică Recompensa Zilnică</button>
   </div>
 
-  <!-- Adsgram ad -->
   <div class="taskCard" id="taskAdCard">
     <div class="taskInfo">
       <div class="taskTitle">📺 Vizionează Reclamă (Adsgram)</div>
@@ -1287,7 +1280,7 @@ body::before{
   </div>
 </div>
 
-<!-- ════════ REFERRAL TAB ════════ -->
+<!-- REFERRAL TAB -->
 <div id="referralTab" class="section hidden">
   <div class="sectionTitle">👥 Sistem Referrals</div>
   <div class="referralBox">
@@ -1318,17 +1311,15 @@ body::before{
   </div>
 </div>
 
-<!-- ════════ WALLET TAB ════════ -->
+<!-- WALLET TAB -->
 <div id="walletTab" class="section hidden">
   <div class="sectionTitle">👛 TON Wallet & Balanță</div>
 
-  <!-- TON Connect card -->
   <div class="ton-wallet-card">
     <div class="wallet-status">
       <div class="wallet-dot" id="walletDot"></div>
       <span id="walletStatusTxt">Wallet neconectat</span>
     </div>
-    <!-- TON Connect UI injectează butonul aici -->
     <div id="ton-connect-btn">
       <div style="color:var(--muted);font-size:13px;padding:10px;">Se încarcă wallet...</div>
     </div>
@@ -1336,15 +1327,22 @@ body::before{
     <div id="tonBalanceRow" class="hidden" style="margin-top:10px;font-size:12px;color:var(--muted)">
       Adresa salvată pentru retrageri viitoare ✅
     </div>
+    <!-- Manual address input -->
+    <div class="manual-wallet">
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--text);">Sau introdu adresa manual:</div>
+      <div style="display:flex;gap:8px;">
+        <input id="manualWalletInput" type="text" placeholder="Ex: EQD2...hX"
+          style="flex:1;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:12px 14px;color:white;font-size:13px;outline:none;"/>
+        <button id="manualSaveWallet" class="btn btn-ton btn-sm">Salvează manual</button>
+      </div>
+    </div>
   </div>
 
-  <!-- ZX Balance -->
   <div style="background:rgba(0,0,0,.18);border-radius:18px;padding:16px;border:1px solid rgba(255,255,255,.05)">
     <div style="font-size:12px;color:var(--muted)">ZX Balance</div>
     <div id="walletBalance" style="margin-top:6px;font-size:32px;font-weight:900">0</div>
   </div>
 
-  <!-- History -->
   <div style="margin-top:16px">
     <div style="font-size:14px;font-weight:800;margin-bottom:12px">📋 Istoric Retrageri</div>
     <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -1374,7 +1372,7 @@ body::before{
   </div>
 </div>
 
-<!-- ════════ RANK TAB ════════ -->
+<!-- RANK TAB -->
 <div id="rankTab" class="section hidden">
   <div class="sectionTitle">🏆 Global Leaderboard</div>
   <div id="leaderboard"><div style="color:var(--muted);text-align:center;padding:20px">Se încarcă...</div></div>
@@ -1442,7 +1440,6 @@ var cfg = {
 
 fetch('/api/config').then(function(r){ return r.json(); }).then(function(d){
   cfg = d;
-  // Update UI links and rewards
   var ch1 = document.getElementById('ch1Link');
   if(ch1) ch1.href = cfg.linkChannel;
   var ch2Card = document.getElementById('taskCh2Card');
@@ -1453,23 +1450,21 @@ fetch('/api/config').then(function(r){ return r.json(); }).then(function(d){
   if(twl) twl.href = cfg.linkTwitter;
   var pl = document.getElementById('partnerLink');
   if(pl) pl.href = cfg.linkPartner;
-  // Update reward displays
   function setDisp(id, val){ var el=document.getElementById(id); if(el) el.textContent=fmt(val); }
   setDisp('rewardAdDisp', cfg.rewardAd);
   setDisp('rewardCh1Disp', cfg.rewardChannel);
   setDisp('rewardCh2Disp', cfg.rewardChannel2);
   setDisp('rewardTwDisp', cfg.rewardTwitter);
   setDisp('rewardPartnerDisp', cfg.rewardPartner);
-  // Init Adsgram after config loaded
   initAdsgram();
-  // Init TON Connect after config loaded
   initTonConnect();
-  // Restore verify buttons visibility
   restoreVerifyButtons();
+  syncManualAddressField();
 }).catch(function(){
   initAdsgram();
   initTonConnect();
   restoreVerifyButtons();
+  syncManualAddressField();
 });
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -1489,12 +1484,10 @@ var state = {
   referralCode:  raw.referralCode  || '',
   referredByDone: raw.referredByDone || false,
   walletAddress: raw.walletAddress || '',
-  linkClicked:   raw.linkClicked   || {}   // { channel1: true, channel2: true, twitter: true, partner: true }
+  linkClicked:   raw.linkClicked   || {}
 };
-
 function save(){ try{ localStorage.setItem(SK, JSON.stringify(state)); }catch(e){} }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(v){ return Number(v).toLocaleString('ro-RO'); }
 
 var _toast;
@@ -1505,13 +1498,11 @@ function toast(msg, dur){
   _toast = setTimeout(function(){ el.classList.remove('show'); }, dur||2500);
 }
 
-// ─── Costs ────────────────────────────────────────────────────────────────────
 function tapCost()     { return Math.round(1000 * Math.pow(state.tapLevel+1, 2.2)); }
 function energyCost()  { return Math.round(2500 * Math.pow(state.energyLevel+1, 2.2)); }
 function passiveCost() { return Math.round(5000 * Math.pow(state.passiveLevel+1, 2.5)); }
 function pph(lvl){ return lvl<=0 ? 0 : Math.round(100 * Math.pow(1.8, lvl-1)); }
 
-// ─── UI update ────────────────────────────────────────────────────────────────
 function updateUI(){
   document.getElementById('balanceDisplay').textContent = fmt(state.balance);
   document.getElementById('walletBalance').textContent  = fmt(state.balance);
@@ -1536,6 +1527,7 @@ function updateUI(){
   updateCheckinGrid();
   restoreTaskButtons();
   restoreVerifyButtons();
+  syncManualAddressField();
 }
 
 function updateCheckinGrid(){
@@ -1564,9 +1556,7 @@ function restoreTaskButtons(){
   }
 }
 
-// ─── Verify buttons logic ─────────────────────────────────────────────────────
 function showVerifyBtn(e, taskId){
-  // Let the link open normally, then reveal the claim button
   var btn = document.getElementById('taskBtn_' + taskId);
   if(btn){
     btn.style.display = 'inline-block';
@@ -1585,7 +1575,7 @@ function restoreVerifyButtons(){
   });
 }
 
-// ─── Server sync ──────────────────────────────────────────────────────────────
+// ─── Sync with server ────────────────────────────────────────────────────────
 var syncT = null;
 function syncNow(immediate){
   if(cu.username==='guest') return;
@@ -1606,7 +1596,7 @@ function syncNow(immediate){
   }, immediate ? 300 : 1800);
 }
 
-// ─── Coin tap ─────────────────────────────────────────────────────────────────
+// ─── Coin tap ────────────────────────────────────────────────────────────────
 var coin = document.getElementById('coin');
 var lastTap = 0;
 function gainTap(x, y){
@@ -1634,12 +1624,11 @@ coin.addEventListener('touchstart', function(e){
 coin.addEventListener('mousedown', function(e){ if(e.button===0) gainTap(e.clientX, e.clientY); });
 coin.addEventListener('contextmenu', function(e){ e.preventDefault(); });
 
-// Energy regen 1/3s
 setInterval(function(){
   if(state.energy < state.maxEnergy){ state.energy = Math.min(state.maxEnergy, state.energy+1); save(); updateUI(); }
 }, 3000);
 
-// ─── Tabs ─────────────────────────────────────────────────────────────────────
+// ─── Tabs ────────────────────────────────────────────────────────────────────
 var TABS = ['generator','tasks','referral','wallet','rank'];
 document.querySelectorAll('.tabBtn').forEach(function(btn){
   btn.addEventListener('click', function(){
@@ -1654,7 +1643,7 @@ document.querySelectorAll('.tabBtn').forEach(function(btn){
   });
 });
 
-// ─── Upgrades ─────────────────────────────────────────────────────────────────
+// ─── Upgrades ────────────────────────────────────────────────────────────────
 document.getElementById('buyTap').addEventListener('click', function(){
   var c=tapCost(); if(state.balance<c) return;
   state.balance-=c; state.tapLevel++; save(); updateUI(); syncNow(true);
@@ -1672,7 +1661,7 @@ document.getElementById('buyPassive').addEventListener('click', function(){
   toast('⚙️ Passive Mining Lv.'+state.passiveLevel+' → '+fmt(pph(state.passiveLevel))+' ZX/oră');
 });
 
-// ─── Recharge modal ───────────────────────────────────────────────────────────
+// ─── Recharge modal ──────────────────────────────────────────────────────────
 var adCount=0;
 document.getElementById('rechargeBtn').addEventListener('click', function(){
   adCount=0;
@@ -1681,7 +1670,6 @@ document.getElementById('rechargeBtn').addEventListener('click', function(){
   document.getElementById('rechargeModal').style.display='flex';
 });
 document.getElementById('watchRechargeAd').addEventListener('click', function(){
-  // Use Adsgram for recharge ads too if available
   if(window._adsgramController){
     document.getElementById('rechargeModal').style.display='none';
     window._adsgramController.show().then(function(){
@@ -1698,7 +1686,7 @@ document.getElementById('watchRechargeAd').addEventListener('click', function(){
 });
 document.getElementById('closeRecharge').addEventListener('click', function(){ document.getElementById('rechargeModal').style.display='none'; });
 
-// ─── ADSGRAM ──────────────────────────────────────────────────────────────────
+// ─── ADSGRAM ─────────────────────────────────────────────────────────────────
 function initAdsgram(){
   if(!cfg.adsgramBlockId || cfg.adsgramBlockId==='your-adsgram-block-id') return;
   if(typeof window.Adsgram === 'undefined'){
@@ -1710,22 +1698,16 @@ function initAdsgram(){
 
 document.getElementById('watchAdBtn').addEventListener('click', function(){
   if(cu.username==='guest'){ toast('⚠️ Autentifică-te prin Telegram!'); return; }
-
-  // If Adsgram not configured/available, fallback
   if(!window._adsgramController){
-    // Fallback: direct reward without ad (dev mode)
     state.balance += (cfg.rewardAd || 1000);
     save(); updateUI(); syncNow(true);
     toast('+'+fmt(cfg.rewardAd||1000)+' ZX (mod dev)');
     return;
   }
-
   var loading = document.getElementById('adLoading');
   loading.classList.add('show');
-
   window._adsgramController.show().then(function(){
     loading.classList.remove('show');
-    // Notify server — server validates and adds reward
     fetch('/api/ad-reward', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({ username:cu.username, telegramId:cu.id, blockId:cfg.adsgramBlockId })
@@ -1735,7 +1717,6 @@ document.getElementById('watchAdBtn').addEventListener('click', function(){
         toast(d.message || '+'+fmt(d.reward)+' ZX!');
       }
     }).catch(function(){
-      // Fallback if server unreachable
       state.balance += (cfg.rewardAd||1000); save(); updateUI();
       toast('+'+fmt(cfg.rewardAd||1000)+' ZX!');
     });
@@ -1745,13 +1726,11 @@ document.getElementById('watchAdBtn').addEventListener('click', function(){
   });
 });
 
-// ─── TASKS (channel verification) ────────────────────────────────────────────
+// ─── TASKS ───────────────────────────────────────────────────────────────────
 function claimTask(taskId, btn){
   if(cu.username==='guest'){ toast('⚠️ Autentifică-te prin Telegram!'); return; }
   if(state.claimedTasks[taskId]){ toast('Deja revendicat.'); return; }
-
   btn.disabled = true; btn.textContent = '⏳...';
-
   fetch('/api/task/claim', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({ username:cu.username, telegramId:cu.id, taskId:taskId })
@@ -1771,7 +1750,7 @@ function claimTask(taskId, btn){
   });
 }
 
-// ─── Daily check-in ───────────────────────────────────────────────────────────
+// ─── Daily check-in ──────────────────────────────────────────────────────────
 document.getElementById('checkinBtn').addEventListener('click', function(){
   if(cu.username==='guest'){ toast('⚠️ Autentifică-te prin Telegram!'); return; }
   fetch('/api/checkin',{
@@ -1786,7 +1765,7 @@ document.getElementById('checkinBtn').addEventListener('click', function(){
   }).catch(function(){ toast('❌ Eroare.'); });
 });
 
-// ─── Referral ─────────────────────────────────────────────────────────────────
+// ─── Referral ────────────────────────────────────────────────────────────────
 function loadReferral(){
   if(cu.username==='guest'){ document.getElementById('myRefCode').textContent='GUEST'; return; }
   fetch('/api/referral?username='+encodeURIComponent(cu.username)+'&telegramId='+cu.id)
@@ -1822,7 +1801,27 @@ document.getElementById('claimRef').addEventListener('click', function(){
   }).catch(function(){ toast('❌ Eroare.'); });
 });
 
-// ─── TON CONNECT ──────────────────────────────────────────────────────────────
+// ─── TON CONNECT + manual wallet ─────────────────────────────────────────────
+function syncManualAddressField(){
+  var input = document.getElementById('manualWalletInput');
+  if(input && state.walletAddress){
+    input.value = state.walletAddress;
+  }
+}
+
+function updateWalletUI(address){
+  // common update after successful wallet connect/save
+  var addrDisp = document.getElementById('tonAddrDisplay');
+  addrDisp.textContent = address;
+  addrDisp.classList.remove('hidden');
+  document.getElementById('walletDot').classList.add('connected');
+  document.getElementById('walletStatusTxt').textContent = 'Wallet conectat ✅';
+  document.getElementById('tonBalanceRow').classList.remove('hidden');
+  state.walletAddress = address;
+  save();
+  syncManualAddressField();
+}
+
 function initTonConnect(){
   if(typeof TonConnectUI === 'undefined') return;
   var manifestUrl = (cfg.appUrl||'')+'/tonconnect-manifest.json';
@@ -1831,61 +1830,60 @@ function initTonConnect(){
   try{
     tonConnect = new TonConnectUI({
       manifestUrl: manifestUrl,
-      buttonRootId: 'ton-connect-btn'
+      buttonRootId: 'ton-connect-btn',
+      actionsConfiguration: {
+        returnStrategy: 'back'   // mai stabil în Telegram WebView
+      }
     });
   } catch(e){ return; }
 
-  // Subscribe to wallet changes
   tonConnect.onStatusChange(function(wallet){
-    var dot = document.getElementById('walletDot');
-    var statusTxt = document.getElementById('walletStatusTxt');
-    var addrDisp = document.getElementById('tonAddrDisplay');
-    var balRow = document.getElementById('tonBalanceRow');
-
     if(wallet){
       var addr = wallet.account.address;
-      // Convert to friendly format if needed (first 8...last 8)
-      var friendly = addr.length > 20 ? addr.slice(0,8)+'...'+addr.slice(-8) : addr;
-
-      dot.classList.add('connected');
-      statusTxt.textContent = 'Wallet conectat ✅';
-      addrDisp.textContent = addr;
-      addrDisp.classList.remove('hidden');
-      balRow.classList.remove('hidden');
-
-      // Save address to server
-      state.walletAddress = addr;
-      save();
-
+      updateWalletUI(addr);
+      // save to server
       if(cu.username !== 'guest'){
         fetch('/api/wallet/save',{
           method:'POST', headers:{'Content-Type':'application/json'},
           body:JSON.stringify({ username:cu.username, telegramId:cu.id, address:addr })
         }).then(function(r){ return r.json(); }).then(function(d){
-          if(d.success) toast('🔗 Adresă TON salvată: '+friendly);
+          if(d.success) toast('🔗 Adresă TON salvată: '+addr.slice(0,8)+'...');
         }).catch(function(){});
       }
     } else {
-      dot.classList.remove('connected');
-      statusTxt.textContent = 'Wallet neconectat';
-      addrDisp.classList.add('hidden');
-      balRow.classList.add('hidden');
+      // disconnected
+      document.getElementById('walletDot').classList.remove('connected');
+      document.getElementById('walletStatusTxt').textContent = 'Wallet neconectat';
+      document.getElementById('tonAddrDisplay').classList.add('hidden');
+      document.getElementById('tonBalanceRow').classList.add('hidden');
       state.walletAddress = ''; save();
+      syncManualAddressField();
     }
   });
 
-  // Restore if already had wallet
+  // Restaurare stare dacă există deja adresă
   if(state.walletAddress){
-    var addrDisp = document.getElementById('tonAddrDisplay');
-    addrDisp.textContent = state.walletAddress;
-    addrDisp.classList.remove('hidden');
-    document.getElementById('walletDot').classList.add('connected');
-    document.getElementById('walletStatusTxt').textContent = 'Wallet conectat ✅';
-    document.getElementById('tonBalanceRow').classList.remove('hidden');
+    updateWalletUI(state.walletAddress);
   }
 }
 
-// ─── Leaderboard ──────────────────────────────────────────────────────────────
+// Manual save button
+document.getElementById('manualSaveWallet').addEventListener('click', function(){
+  var addr = document.getElementById('manualWalletInput').value.trim();
+  if(!addr){ toast('Introdu o adresă validă.'); return; }
+  updateWalletUI(addr);
+  if(cu.username !== 'guest'){
+    fetch('/api/wallet/save',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ username:cu.username, telegramId:cu.id, address:addr })
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.success) toast('Adresă salvată!');
+    }).catch(function(){});
+  }
+  toast('Adresă salvată manual ✅');
+});
+
+// ─── Leaderboard ─────────────────────────────────────────────────────────────
 function loadLeaderboard(){
   var board = document.getElementById('leaderboard');
   board.innerHTML = '<div style="color:var(--muted);text-align:center;padding:16px">Se încarcă...</div>';
@@ -1911,13 +1909,13 @@ function loadLeaderboard(){
   });
 }
 
-// ─── Wallet delete ────────────────────────────────────────────────────────────
+// ─── Delete local data ───────────────────────────────────────────────────────
 document.getElementById('deleteAccountBtn').addEventListener('click', function(){
   if(!confirm('Ștergi datele locale? Progresul pe server rămâne.')) return;
   localStorage.removeItem(SK); location.reload();
 });
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
+// ─── Init ────────────────────────────────────────────────────────────────────
 updateUI();
 if(cu.username!=='guest'){
   setTimeout(function(){ syncNow(true); }, 600);
