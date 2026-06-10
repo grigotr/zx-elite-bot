@@ -7,7 +7,6 @@ import (
 	"os"
 	"sort"
 	"sync"
-	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -31,7 +30,22 @@ type LeaderboardEntry struct {
 var (
 	players   = make(map[string]PlayerUpdate)
 	playersMu sync.RWMutex
+	bot       *tgbotapi.BotAPI
 )
+
+func loadPlayers() {
+	if data, err := os.ReadFile("players.json"); err == nil {
+		var saved map[string]PlayerUpdate
+		if json.Unmarshal(data, &saved) == nil {
+			playersMu.Lock()
+			for k, v := range saved {
+				players[k] = v
+			}
+			playersMu.Unlock()
+			log.Println("✅ Date încărcate din players.json")
+		}
+	}
+}
 
 func savePlayersToFile() {
 	playersMu.RLock()
@@ -63,7 +77,7 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	playersMu.Unlock()
 
-	go savePlayersToFile()
+	savePlayersToFile()
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
@@ -88,7 +102,7 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 	delete(players, req.UserID)
 	playersMu.Unlock()
 
-	go savePlayersToFile()
+	savePlayersToFile()
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("deleted"))
@@ -121,6 +135,24 @@ func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(entries)
+}
+
+func handleWebhook(w http.ResponseWriter, r *http.Request) {
+	if bot == nil {
+		http.Error(w, "Bot not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	var update tgbotapi.Update
+	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	if update.Message != nil && update.Message.Text == "/start" {
+		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "ZX WebApp is live")
+		bot.Send(msg)
+	}
 }
 
 const webAppHTML = `
@@ -464,20 +496,33 @@ body::before{
 <script>
 var currentUser = { id: 'guest', name: 'Guest' };
 
-if (window.Telegram && window.Telegram.WebApp) {
-  var tg = window.Telegram.WebApp;
-  tg.ready();
-  var userData = tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
-  if (userData && userData.id) {
-    currentUser.id = String(userData.id);
-    currentUser.name = userData.first_name || 'Player';
-    if (userData.last_name) {
-      currentUser.name += ' ' + userData.last_name;
+// Inițializare Telegram
+(function() {
+  if (window.Telegram && window.Telegram.WebApp) {
+    var tg = window.Telegram.WebApp;
+    tg.ready();
+    var userData = tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
+    if (userData && userData.id) {
+      currentUser.id = String(userData.id);
+      currentUser.name = userData.first_name || 'Player';
+      if (userData.last_name) {
+        currentUser.name += ' ' + userData.last_name;
+      }
     }
   }
-}
 
-document.getElementById('telegramUser').innerText = currentUser.name;
+  // Afișează numele
+  document.getElementById('telegramUser').innerText = currentUser.name;
+
+  // Debug: arată un mesaj dacă nu suntem în Telegram
+  if (currentUser.name === 'Guest') {
+    setTimeout(function() {
+      alert('⚠️ Nu ești conectat prin Telegram!\n\n' +
+            'Deschide aplicația prin butonul "🎮 Joacă ZX Network" din chat-ul botului.\n\n' +
+            'Dacă nu vezi butonul, configurează-l în BotFather cu /setmenubutton.');
+    }, 500);
+  }
+})();
 
 var STORAGE_KEY = 'zx-network-state';
 var state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
@@ -704,55 +749,29 @@ updateUI();
 func main() {
 	token := "8744648391:AAHbsnd54wrv686PkLCbtj4ueBm4DqEB4vQ"
 
-	// Restaurare date din fișier (dacă există)
-	if data, err := os.ReadFile("players.json"); err == nil {
-		var saved map[string]PlayerUpdate
-		if json.Unmarshal(data, &saved) == nil {
-			playersMu.Lock()
-			for k, v := range saved {
-				players[k] = v
-			}
-			playersMu.Unlock()
-			log.Println("✅ Date încărcate din players.json")
-		}
-	}
-
-	bot, err := tgbotapi.NewBotAPI(token)
+	// Inițializare bot
+	var err error
+	bot, err = tgbotapi.NewBotAPI(token)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	// Încarcă datele salvate
+	loadPlayers()
+
+	// Endpoint-uri API
 	http.HandleFunc("/api/update", handleUpdate)
 	http.HandleFunc("/api/delete", handleDelete)
 	http.HandleFunc("/api/leaderboard", handleLeaderboard)
 
-	// Salvare periodică (fiecare 60 secunde)
-	go func() {
-		for {
-			time.Sleep(60 * time.Second)
-			savePlayersToFile()
-		}
-	}()
+	// Webhook endpoint
+	http.HandleFunc("/webhook", handleWebhook)
 
+	// Servește aplicația
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(webAppHTML))
 	})
-
-	go func() {
-		u := tgbotapi.NewUpdate(0)
-		u.Timeout = 60
-		updates := bot.GetUpdatesChan(u)
-		for update := range updates {
-			if update.Message == nil {
-				continue
-			}
-			if update.Message.Text == "/start" {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "ZX WebApp is live")
-				bot.Send(msg)
-			}
-		}
-	}()
 
 	port := os.Getenv("PORT")
 	if port == "" {
