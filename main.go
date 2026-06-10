@@ -70,6 +70,7 @@ type PlayerState struct {
 	TelegramID    int64        `json:"telegramId"`
 	ClaimedTasks  []string     `json:"claimedTasks"`
 	WalletAddress string       `json:"walletAddress"`
+	LastAdWatch   time.Time    `json:"lastAdWatch"`
 }
 
 type SyncRecord struct {
@@ -363,8 +364,6 @@ func validateBalanceIncrease(p *PlayerState, newBalance int64, tapLevel, passive
 // TELEGRAM CHANNEL MEMBERSHIP CHECK
 // ═════════════════════════════════════════════════════════════════════════════
 
-// checkChannelMember returns true if userID is a member/admin/owner of channel.
-// Requires bot to be admin in the channel.
 func checkChannelMember(channel string, userID int64) bool {
 	if bot == nil || userID == 0 {
 		return false
@@ -626,7 +625,6 @@ func handleTaskClaim(w http.ResponseWriter, r *http.Request) {
 
 	switch req.TaskID {
 	case "channel1":
-		// Verificare reală membership canal principal
 		if !checkChannelMember(TG_CHANNEL, req.TelegramID) {
 			jsonResp(w, TaskClaimResponse{Success: false, Message: "⚠️ Nu ești abonat la canal! Abonează-te mai întâi."})
 			return
@@ -647,7 +645,6 @@ func handleTaskClaim(w http.ResponseWriter, r *http.Request) {
 		msg = fmt.Sprintf("✅ Abonat la %s! +%s ZX", TG_CHANNEL2, formatInt(reward))
 
 	case "twitter":
-		// Twitter nu poate fi verificat server-side, acceptăm pe cuvânt
 		reward = REWARD_TWITTER
 		msg = fmt.Sprintf("✅ Twitter urmărit! +%s ZX", formatInt(reward))
 
@@ -678,10 +675,8 @@ func handleTaskClaim(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, TaskClaimResponse{Success: true, Reward: reward, Balance: bal, Message: msg})
 }
 
-// ─── Adsgram reward verification ─────────────────────────────────────────────
+// ─── Adsgram reward verification with 5-minute cooldown ─────────────────────
 
-// handleAdsgramReward is called client-side after Adsgram fires onReward callback.
-// We verify the reward is legitimate and add ZX to the player's balance.
 func handleAdsgramReward(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
 	if r.Method == http.MethodOptions {
@@ -703,7 +698,6 @@ func handleAdsgramReward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate block ID matches our configured one (prevents spoofing)
 	if req.BlockID != ADSGRAM_BLOCK_ID {
 		jsonResp(w, AdsgramVerifyResponse{Success: false, Message: "Block ID invalid."})
 		return
@@ -711,6 +705,21 @@ func handleAdsgramReward(w http.ResponseWriter, r *http.Request) {
 
 	db.mu.Lock()
 	p := getOrCreatePlayer(req.Username, req.TelegramID)
+
+	// ⏱️ Verificare cooldown 5 minute
+	if time.Since(p.LastAdWatch) < 5*time.Minute {
+		remaining := int(5*time.Minute - time.Since(p.LastAdWatch).Seconds())
+		bal := p.Balance
+		db.mu.Unlock()
+		jsonResp(w, map[string]interface{}{
+			"success":  false,
+			"message":  fmt.Sprintf("⏳ Reclama disponibilă în %d secunde.", remaining),
+			"cooldown": remaining,
+		})
+		return
+	}
+
+	p.LastAdWatch = time.Now()
 	p.Balance += REWARD_WATCH_AD
 	p.LastBalance = p.Balance
 	bal := p.Balance
@@ -718,10 +727,11 @@ func handleAdsgramReward(w http.ResponseWriter, r *http.Request) {
 	scheduleSave()
 
 	jsonResp(w, map[string]interface{}{
-		"success": true,
-		"reward":  REWARD_WATCH_AD,
-		"balance": bal,
-		"message": fmt.Sprintf("+%s ZX din reclamă!", formatInt(REWARD_WATCH_AD)),
+		"success":  true,
+		"reward":   REWARD_WATCH_AD,
+		"balance":  bal,
+		"message":  fmt.Sprintf("+%s ZX din reclamă!", formatInt(REWARD_WATCH_AD)),
+		"cooldown": 300, // 5 minute
 	})
 }
 
@@ -759,32 +769,32 @@ func handleTonManifest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	manifest := map[string]interface{}{
-		"url":  APP_URL,
-		"name": "ZX Network",
-		"iconUrl": APP_URL + "/icon.png",
-		"termsOfUseUrl":   APP_URL + "/terms",
-		"privacyPolicyUrl": APP_URL + "/privacy",
+		"url":               APP_URL,
+		"name":              "ZX Network",
+		"iconUrl":           APP_URL + "/icon.png",
+		"termsOfUseUrl":     APP_URL + "/terms",
+		"privacyPolicyUrl":  APP_URL + "/privacy",
 	}
 	json.NewEncoder(w).Encode(manifest)
 }
 
-// ─── App config endpoint (frontend reads this) ────────────────────────────────
+// ─── App config endpoint ──────────────────────────────────────────────────────
 
 func handleAppConfig(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
 	jsonResp(w, map[string]interface{}{
-		"adsgramBlockId": ADSGRAM_BLOCK_ID,
-		"linkChannel":    LINK_CHANNEL,
-		"linkChannel2":   LINK_CHANNEL2,
-		"linkTwitter":    LINK_TWITTER,
-		"linkPartner":    LINK_PARTNER,
+		"adsgramBlockId":  ADSGRAM_BLOCK_ID,
+		"linkChannel":     LINK_CHANNEL,
+		"linkChannel2":    LINK_CHANNEL2,
+		"linkTwitter":     LINK_TWITTER,
+		"linkPartner":     LINK_PARTNER,
 		"channel2Enabled": TG_CHANNEL2 != "",
-		"rewardChannel":  REWARD_JOIN_CHANNEL,
-		"rewardChannel2": REWARD_JOIN_CHANNEL2,
-		"rewardTwitter":  REWARD_TWITTER,
-		"rewardPartner":  REWARD_PARTNER_BOT,
-		"rewardAd":       REWARD_WATCH_AD,
-		"appUrl":         APP_URL,
+		"rewardChannel":   REWARD_JOIN_CHANNEL,
+		"rewardChannel2":  REWARD_JOIN_CHANNEL2,
+		"rewardTwitter":   REWARD_TWITTER,
+		"rewardPartner":   REWARD_PARTNER_BOT,
+		"rewardAd":        REWARD_WATCH_AD,
+		"appUrl":          APP_URL,
 	})
 }
 
@@ -1686,7 +1696,7 @@ document.getElementById('watchRechargeAd').addEventListener('click', function(){
 });
 document.getElementById('closeRecharge').addEventListener('click', function(){ document.getElementById('rechargeModal').style.display='none'; });
 
-// ─── ADSGRAM ─────────────────────────────────────────────────────────────────
+// ─── ADSGRAM (cu cooldown de 5 minute) ──────────────────────────────────────
 function initAdsgram(){
   if(!cfg.adsgramBlockId || cfg.adsgramBlockId==='your-adsgram-block-id') return;
   if(typeof window.Adsgram === 'undefined'){
@@ -1696,16 +1706,22 @@ function initAdsgram(){
   window._adsgramController = window.Adsgram.init({ blockId: cfg.adsgramBlockId });
 }
 
+var adCooldownTimer = null;
+
 document.getElementById('watchAdBtn').addEventListener('click', function(){
   if(cu.username==='guest'){ toast('⚠️ Autentifică-te prin Telegram!'); return; }
+  if(this.disabled) return;
+
   if(!window._adsgramController){
     state.balance += (cfg.rewardAd || 1000);
     save(); updateUI(); syncNow(true);
     toast('+'+fmt(cfg.rewardAd||1000)+' ZX (mod dev)');
     return;
   }
+
   var loading = document.getElementById('adLoading');
   loading.classList.add('show');
+
   window._adsgramController.show().then(function(){
     loading.classList.remove('show');
     fetch('/api/ad-reward', {
@@ -1715,6 +1731,10 @@ document.getElementById('watchAdBtn').addEventListener('click', function(){
       if(d.success){
         state.balance = d.balance; save(); updateUI();
         toast(d.message || '+'+fmt(d.reward)+' ZX!');
+        startAdCooldown(d.cooldown || 300);
+      } else {
+        toast(d.message || 'Eroare.');
+        if(d.cooldown) startAdCooldown(d.cooldown);
       }
     }).catch(function(){
       state.balance += (cfg.rewardAd||1000); save(); updateUI();
@@ -1725,6 +1745,26 @@ document.getElementById('watchAdBtn').addEventListener('click', function(){
     if(err && err.error){ toast('ℹ️ Reclame indisponibile momentan.'); }
   });
 });
+
+function startAdCooldown(seconds){
+  var btn = document.getElementById('watchAdBtn');
+  btn.disabled = true;
+  var remaining = seconds;
+  var originalText = btn.textContent;
+  btn.textContent = remaining + 's';
+
+  clearInterval(adCooldownTimer);
+  adCooldownTimer = setInterval(function(){
+    remaining--;
+    if(remaining <= 0){
+      clearInterval(adCooldownTimer);
+      btn.textContent = originalText;
+      btn.disabled = false;
+    } else {
+      btn.textContent = remaining + 's';
+    }
+  }, 1000);
+}
 
 // ─── TASKS ───────────────────────────────────────────────────────────────────
 function claimTask(taskId, btn){
@@ -1810,7 +1850,6 @@ function syncManualAddressField(){
 }
 
 function updateWalletUI(address){
-  // common update after successful wallet connect/save
   var addrDisp = document.getElementById('tonAddrDisplay');
   addrDisp.textContent = address;
   addrDisp.classList.remove('hidden');
@@ -1832,7 +1871,7 @@ function initTonConnect(){
       manifestUrl: manifestUrl,
       buttonRootId: 'ton-connect-btn',
       actionsConfiguration: {
-        returnStrategy: 'back'   // mai stabil în Telegram WebView
+        returnStrategy: 'back'
       }
     });
   } catch(e){ return; }
@@ -1841,7 +1880,6 @@ function initTonConnect(){
     if(wallet){
       var addr = wallet.account.address;
       updateWalletUI(addr);
-      // save to server
       if(cu.username !== 'guest'){
         fetch('/api/wallet/save',{
           method:'POST', headers:{'Content-Type':'application/json'},
@@ -1851,7 +1889,6 @@ function initTonConnect(){
         }).catch(function(){});
       }
     } else {
-      // disconnected
       document.getElementById('walletDot').classList.remove('connected');
       document.getElementById('walletStatusTxt').textContent = 'Wallet neconectat';
       document.getElementById('tonAddrDisplay').classList.add('hidden');
@@ -1861,13 +1898,11 @@ function initTonConnect(){
     }
   });
 
-  // Restaurare stare dacă există deja adresă
   if(state.walletAddress){
     updateWalletUI(state.walletAddress);
   }
 }
 
-// Manual save button
 document.getElementById('manualSaveWallet').addEventListener('click', function(){
   var addr = document.getElementById('manualWalletInput').value.trim();
   if(!addr){ toast('Introdu o adresă validă.'); return; }
