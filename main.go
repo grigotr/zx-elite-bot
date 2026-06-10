@@ -12,7 +12,6 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// ─── Structuri pentru API ───
 type SyncRequest struct {
 	Username string `json:"username"`
 	Balance  int    `json:"balance"`
@@ -23,20 +22,19 @@ type LeaderboardEntry struct {
 	Balance  int    `json:"balance"`
 }
 
-// ─── Stare server (protejată de mutex) ───
 type PlayerState struct {
-	Balance    int
-	LastSync   time.Time
+	Balance     int
+	LastSync    time.Time
 	LastBalance int
 }
 
 var (
-	players   = make(map[string]*PlayerState) // username -> state
+	players   = make(map[string]*PlayerState)
 	playersMu sync.Mutex
 	bot       *tgbotapi.BotAPI
 )
 
-// Validare anti-cheat: max 100 puncte pe secundă
+// Anti‑cheat: creșterea nu poate depăși 100 puncte/secundă
 func validateBalanceIncrease(user string, newBalance int) int {
 	playersMu.Lock()
 	defer playersMu.Unlock()
@@ -45,19 +43,15 @@ func validateBalanceIncrease(user string, newBalance int) int {
 	now := time.Now()
 
 	if !exists {
-		// prima sincronizare – acceptă soldul trimis
 		players[user] = &PlayerState{
-			Balance:    newBalance,
-			LastSync:   now,
+			Balance:     newBalance,
+			LastSync:    now,
 			LastBalance: newBalance,
 		}
 		return newBalance
 	}
 
-	elapsed := now.Sub(state.LastSync).Seconds()
-	maxIncrease := int(elapsed * 100) // 100 puncte / secundă
-
-	// Dacă soldul scade (cheltuieli), permitem orice scădere
+	// Dacă soldul scade (cheltuieli), acceptăm orice valoare
 	if newBalance <= state.LastBalance {
 		state.Balance = newBalance
 		state.LastBalance = newBalance
@@ -65,20 +59,18 @@ func validateBalanceIncrease(user string, newBalance int) int {
 		return newBalance
 	}
 
+	elapsed := now.Sub(state.LastSync).Seconds()
+	maxIncrease := int(elapsed * 100)
 	increase := newBalance - state.LastBalance
 	if increase > maxIncrease {
-		// Limitează creșterea la maximul permis
-		state.Balance = state.LastBalance + maxIncrease
-	} else {
-		state.Balance = newBalance
+		increase = maxIncrease
 	}
-
+	state.Balance = state.LastBalance + increase
 	state.LastBalance = state.Balance
 	state.LastSync = now
 	return state.Balance
 }
 
-// ─── Handlere API ───
 func handleSync(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -94,7 +86,6 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validează și actualizează soldul
 	validBalance := validateBalanceIncrease(req.Username, req.Balance)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -108,21 +99,13 @@ func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	playersMu.Lock()
 	defer playersMu.Unlock()
 
-	// Construiește slice din map
 	var list []LeaderboardEntry
 	for user, state := range players {
-		list = append(list, LeaderboardEntry{
-			Username: user,
-			Balance:  state.Balance,
-		})
+		list = append(list, LeaderboardEntry{Username: user, Balance: state.Balance})
 	}
 
-	// Sortează descrescător după sold
-	sort.Slice(list, func(i, j int) bool {
-		return list[i].Balance > list[j].Balance
-	})
+	sort.Slice(list, func(i, j int) bool { return list[i].Balance > list[j].Balance })
 
-	// Limitează la top 10
 	if len(list) > 10 {
 		list = list[:10]
 	}
@@ -131,7 +114,6 @@ func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(list)
 }
 
-// ─── Webhook pentru bot (doar răspuns la /start cu buton WebApp) ───
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if bot == nil {
 		http.Error(w, "Bot not initialized", http.StatusInternalServerError)
@@ -147,7 +129,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if update.Message != nil && update.Message.Text == "/start" {
 		webAppURL := os.Getenv("WEBAPP_URL")
 		if webAppURL == "" {
-			webAppURL = "https://your-app.onrender.com" // înlocuiește cu adresa ta reală
+			webAppURL = "https://your-app.onrender.com" // înlocuiește cu URL‑ul tău real
 		}
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
@@ -160,7 +142,6 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ─── HTML/JS (aplicația web) ───
 const webAppHTML = `
 <!DOCTYPE html>
 <html lang="ro">
@@ -501,7 +482,6 @@ body::before{
 </div>
 
 <script>
-// ─── Inițializare Telegram ───
 var tg = window.Telegram ? window.Telegram.WebApp : null;
 var currentUser = { username: 'guest', firstName: 'Guest' };
 
@@ -516,7 +496,6 @@ if (tg) {
 
 document.getElementById('telegramUser').innerText = currentUser.firstName;
 
-// ─── Stare locală (localStorage) ───
 var STORAGE_KEY = 'zx-network-state';
 var state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
 state = {
@@ -538,16 +517,12 @@ function formatNumber(v) {
   return Number(v).toLocaleString('ro-RO');
 }
 
-// ─── Sincronizare cu serverul (anti-cheat) ───
 function syncWithServer() {
   if (currentUser.username === 'guest') return;
   fetch('/api/sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username: currentUser.username,
-      balance: state.balance
-    })
+    body: JSON.stringify({ username: currentUser.username, balance: state.balance })
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
@@ -560,12 +535,10 @@ function syncWithServer() {
   .catch(function(e) { console.error(e); });
 }
 
-// ─── Leaderboard (real de la server) ───
 async function fetchLeaderboard() {
   try {
     var resp = await fetch('/api/leaderboard');
-    var data = await resp.json();
-    return data;
+    return await resp.json();
   } catch(e) {
     console.error(e);
     return [];
@@ -594,7 +567,6 @@ async function updateLeaderboardUI() {
   document.getElementById('myBalance').innerText = formatNumber(state.balance) + ' ZX';
 }
 
-// ─── UI update local ───
 function updateUI() {
   document.getElementById('balanceDisplay').innerText = formatNumber(state.balance);
   document.getElementById('walletBalance').innerText = formatNumber(state.balance);
@@ -606,11 +578,9 @@ function updateUI() {
   energyBtn.disabled = state.balance < getEnergyUpgradeCost();
 }
 
-// ─── Upgrade costs ───
 function getTapUpgradeCost() { return 1000 * Math.pow(state.tapLevel + 1, 2); }
 function getEnergyUpgradeCost() { return 2500 * Math.pow(state.energyLevel + 1, 2); }
 
-// ─── Game actions ───
 function gainTap(event) {
   if (state.energy <= 0) return;
   var gain = 1 + state.tapLevel;
@@ -635,7 +605,6 @@ function spawnFloat(value, posX, posY) {
 
 document.getElementById('coin').addEventListener('click', gainTap);
 
-// Tabs
 document.querySelectorAll('.tabBtn').forEach(function(btn) {
   btn.addEventListener('click', function() {
     document.querySelectorAll('.tabBtn').forEach(function(b) { b.classList.remove('active'); });
@@ -650,7 +619,6 @@ document.querySelectorAll('.tabBtn').forEach(function(btn) {
   });
 });
 
-// Tasks
 function claimTask(id, reward, btn) {
   if (state.claimedTasks[id]) return;
   state.claimedTasks[id] = true;
@@ -661,6 +629,7 @@ function claimTask(id, reward, btn) {
   updateUI();
   syncWithServer();
 }
+
 document.getElementById('taskTelegram').addEventListener('click', function() { claimTask('tg', 500, this); });
 document.getElementById('taskPartner').addEventListener('click', function() { claimTask('partner', 2000, this); });
 document.getElementById('watchAdBtn').addEventListener('click', function() {
@@ -670,7 +639,6 @@ document.getElementById('watchAdBtn').addEventListener('click', function() {
   syncWithServer();
 });
 
-// Wallet
 document.getElementById('connectWallet').addEventListener('click', function() {
   state.walletConnected = true;
   state.walletAddress = 'EQB-' + Math.random().toString(36).substring(2,12);
@@ -681,7 +649,6 @@ document.getElementById('connectWallet').addEventListener('click', function() {
   syncWithServer();
 });
 
-// Delete account
 async function deleteAccount() {
   if (!confirm('Ești sigur că vrei să ștergi contul?')) return;
   localStorage.removeItem(STORAGE_KEY);
@@ -689,7 +656,6 @@ async function deleteAccount() {
 }
 document.getElementById('deleteAccountBtn').addEventListener('click', deleteAccount);
 
-// Recharge
 var adCount = 0;
 document.getElementById('rechargeBtn').addEventListener('click', function() {
   document.getElementById('rechargeModal').style.display = 'flex';
@@ -710,7 +676,6 @@ document.getElementById('closeRecharge').addEventListener('click', function() {
   document.getElementById('rechargeModal').style.display = 'none';
 });
 
-// Upgrades
 document.getElementById('buyTapUpgrade').addEventListener('click', function() {
   var cost = getTapUpgradeCost();
   if (state.balance < cost) return;
@@ -720,6 +685,7 @@ document.getElementById('buyTapUpgrade').addEventListener('click', function() {
   updateUI();
   syncWithServer();
 });
+
 document.getElementById('buyEnergyUpgrade').addEventListener('click', function() {
   var cost = getEnergyUpgradeCost();
   if (state.balance < cost) return;
@@ -747,12 +713,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Endpoint-uri API
 	http.HandleFunc("/api/sync", handleSync)
 	http.HandleFunc("/api/leaderboard", handleLeaderboard)
 	http.HandleFunc("/webhook", handleWebhook)
 
-	// Servește aplicația web
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(webAppHTML))
