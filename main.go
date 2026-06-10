@@ -34,7 +34,7 @@ var (
 	bot       *tgbotapi.BotAPI
 )
 
-// Anti‑cheat: creșterea nu poate depăși 100 puncte/secundă
+// Anti‑cheat: maximum 100 points per second increase
 func validateBalanceIncrease(user string, newBalance int) int {
 	playersMu.Lock()
 	defer playersMu.Unlock()
@@ -51,7 +51,6 @@ func validateBalanceIncrease(user string, newBalance int) int {
 		return newBalance
 	}
 
-	// Dacă soldul scade (cheltuieli), acceptăm orice valoare
 	if newBalance <= state.LastBalance {
 		state.Balance = newBalance
 		state.LastBalance = newBalance
@@ -129,7 +128,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if update.Message != nil && update.Message.Text == "/start" {
 		webAppURL := os.Getenv("WEBAPP_URL")
 		if webAppURL == "" {
-			webAppURL = "https://your-app.onrender.com" // înlocuiește cu URL‑ul tău real
+			webAppURL = "https://your-app.onrender.com"
 		}
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
@@ -142,8 +141,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-const webAppHTML = `
-<!DOCTYPE html>
+const webAppHTML = `<!DOCTYPE html>
 <html lang="ro">
 <head>
 <meta charset="UTF-8">
@@ -238,8 +236,6 @@ body::before{
  transition: transform .12s ease;
 }
 .coin:active{ transform:scale(.94); }
-
-/* Împiedică selectarea și zoom-ul nedorit pe monedă */
 .coin, svg, img {
     -webkit-user-select: none;
     -moz-user-select: none;
@@ -248,7 +244,6 @@ body::before{
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
 }
-
 .energyRow{
  margin-top:24px;
  display:flex;
@@ -712,8 +707,7 @@ document.getElementById('buyEnergyUpgrade').addEventListener('click', function()
 updateUI();
 </script>
 </body>
-</html>
-`
+</html>`
 
 func main() {
 	token := "8744648391:AAHbsnd54wrv686PkLCbtj4ueBm4DqEB4vQ"
