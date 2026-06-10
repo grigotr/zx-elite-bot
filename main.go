@@ -34,7 +34,7 @@ var (
 	bot       *tgbotapi.BotAPI
 )
 
-// Anti‑cheat: maximum 100 points per second increase
+// Anti-cheat: creșterea nu poate depăși 100 puncte/secundă în mod real
 func validateBalanceIncrease(user string, newBalance int) int {
 	playersMu.Lock()
 	defer playersMu.Unlock()
@@ -59,11 +59,18 @@ func validateBalanceIncrease(user string, newBalance int) int {
 	}
 
 	elapsed := now.Sub(state.LastSync).Seconds()
-	maxIncrease := int(elapsed * 100)
+	// Oferim o marjă de minim 1 secundă pentru a evita erorile la prima sincronizare rapidă
+	if elapsed < 1.0 {
+		elapsed = 1.0
+	}
+	
+	maxIncrease := int(elapsed * 120) // 120 puncte/secundă maxim permis structural (marjă pentru upgrade-uri)
 	increase := newBalance - state.LastBalance
+	
 	if increase > maxIncrease {
 		increase = maxIncrease
 	}
+	
 	state.Balance = state.LastBalance + increase
 	state.LastBalance = state.Balance
 	state.LastSync = now
@@ -80,8 +87,9 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
-	if req.Username == "" {
-		http.Error(w, "Missing username", http.StatusBadRequest)
+	if req.Username == "" || req.Username == "guest" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "ignored", "balance": req.Balance})
 		return
 	}
 
@@ -100,7 +108,9 @@ func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 
 	var list []LeaderboardEntry
 	for user, state := range players {
-		list = append(list, LeaderboardEntry{Username: user, Balance: state.Balance})
+		if user != "guest" && user != "" {
+			list = append(list, LeaderboardEntry{Username: user, Balance: state.Balance})
+		}
 	}
 
 	sort.Slice(list, func(i, j int) bool { return list[i].Balance > list[j].Balance })
@@ -128,20 +138,21 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if update.Message != nil && update.Message.Text == "/start" {
 		webAppURL := os.Getenv("WEBAPP_URL")
 		if webAppURL == "" {
-			webAppURL = "https://your-app.onrender.com"
+			webAppURL = "https://your-app.onrender.com" 
 		}
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonWebApp("🎮 Joacă ZX Network", tgbotapi.WebAppInfo{Url: webAppURL}),
 			),
 		)
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Apasă butonul de mai jos pentru a juca:")
+		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "🧬 Bine ai venit în nucleul ZX Network, domnule.\n\nApasă butonul de mai jos pentru a accesa aplicația web oficială și a genera resurse:")
 		msg.ReplyMarkup = keyboard
 		bot.Send(msg)
 	}
 }
 
-const webAppHTML = `<!DOCTYPE html>
+const webAppHTML = `
+<!DOCTYPE html>
 <html lang="ro">
 <head>
 <meta charset="UTF-8">
@@ -163,12 +174,14 @@ const webAppHTML = `<!DOCTYPE html>
 *{ margin:0; padding:0; box-sizing:border-box; }
 body{
  background: radial-gradient(circle at top left, rgba(0,245,212,.12), transparent 40%),
-             radial-gradient(circle at top right, rgba(0,255,135,.08), transparent 40%),
-             #070b10;
+              radial-gradient(circle at top right, rgba(0,255,135,.08), transparent 40%),
+              #070b10;
  color:var(--text);
  font-family: Inter, Segoe UI, sans-serif;
  min-height:100vh;
  overflow-x:hidden;
+ -webkit-user-select: none;
+ user-select: none;
 }
 body::before{
  content:"";
@@ -201,7 +214,7 @@ body::before{
 }
 .userBox{ display:flex; flex-direction:column; gap:4px; }
 .userLabel{ font-size:12px; color:var(--muted); }
-.userName{ font-weight:800; font-size:15px; }
+.userName{ font-weight:800; font-size:15px; color:#fff; }
 .netBadge{
  background: rgba(0,245,212,.15);
  color:var(--green);
@@ -212,7 +225,7 @@ body::before{
  font-weight:800;
  box-shadow: 0 0 18px rgba(0,245,212,.25);
 }
-.balance-container { text-align: center; margin-bottom: 10px; }
+.balance-container { text-align: center; margin-bottom: 10px; margin-top: 10px; }
 .balanceTitle{ color:var(--muted); font-size:12px; letter-spacing:1px; text-transform:uppercase; }
 .balanceValue{
  margin-top:8px;
@@ -228,22 +241,24 @@ body::before{
  border: 1px solid var(--border);
  padding:20px;
 }
-.coinArea{ display:flex; flex-direction:column; align-items:center; justify-content:center; }
-.coin{
- width:240px;
- height:240px;
+.coinArea{ display:flex; flex-direction:column; align-items:center; justify-content:center; margin-top: 15px; }
+
+/* Protecție totală împotriva selecțiilor albastre, bug-urilor de zoom și input */
+.coin {
+ width:245px;
+ height:245px;
  cursor:pointer;
- transition: transform .12s ease;
+ transition: transform .08s ease;
+ -webkit-user-select: none;
+ -moz-user-select: none;
+ -ms-user-select: none;
+ user-select: none;
+ -webkit-tap-highlight-color: transparent !important;
+ outline: none;
+ touch-action: manipulation;
 }
-.coin:active{ transform:scale(.94); }
-.coin, svg, img {
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    user-select: none;
-    -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
-}
+.coin:active{ transform:scale(.92); }
+
 .energyRow{
  margin-top:24px;
  display:flex;
@@ -264,6 +279,7 @@ body::before{
  height:100%;
  background: linear-gradient(90deg, var(--green), var(--green2));
  box-shadow: 0 0 20px rgba(0,245,212,.35);
+ transition: width 0.1s ease;
 }
 .btn{
  border:none;
@@ -329,29 +345,29 @@ body::before{
 }
 .hidden{ display:none; }
 .floatGain{
- position:fixed;
+ position:absolute;
  color:white;
  font-weight:900;
- font-size:22px;
+ font-size:26px;
  pointer-events:none;
  z-index:9999;
  text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000,
-              0 0 8px rgba(0,255,135,0.8);
- animation: floatUp 0.9s ease-out forwards;
+              0 0 10px rgba(0,255,135,0.9);
+ animation: floatUp 0.8s ease-out forwards;
 }
 @keyframes floatUp{
- from{ opacity:1; transform: translateY(0px); }
- to{ opacity:0; transform: translateY(-100px); }
+ from{ opacity:1; transform: translateY(0px) scale(1); }
+ to{ opacity:0; transform: translateY(-120px) scale(0.8); }
 }
 .leaderboardItem {
  display:flex;
  justify-content:space-between;
- padding:10px 0;
+ padding:12px 0;
  border-bottom:1px solid rgba(255,255,255,0.06);
 }
 .leaderboardRank { width:30px; color:var(--green); font-weight:bold; }
 .leaderboardName { flex:1; }
-.leaderboardBalance { color:#fff; }
+.leaderboardBalance { color:#fff; font-weight:bold; }
 .delete-section { margin-top: 20px; }
 </style>
 </head>
@@ -359,7 +375,7 @@ body::before{
 <div class="app">
 <header class="header">
  <div class="userBox">
-   <div class="userLabel">User</div>
+   <div class="userLabel">User Core</div>
    <div id="telegramUser" class="userName">Guest</div>
  </div>
  <div class="netBadge">⚡ ZX-NET LIVE</div>
@@ -410,7 +426,7 @@ body::before{
    <button id="buyTapUpgrade" class="btn" style="width:100%;">Upgrade</button>
   </div>
   <div class="upgradeCard">
-   <div class="upgradeTitle">⚡ Energy Capacity Booster</div>
+   <div class="upgradeTitle">⚡ Energy Capacity</div>
    <button id="buyEnergyUpgrade" class="btn" style="width:100%;">Upgrade</button>
   </div>
  </div>
@@ -420,7 +436,7 @@ body::before{
  <h2 style="margin-bottom:20px; color:#d9fff5;">💼 Tasks</h2>
  <div class="upgradeCard" style="margin-bottom:14px;">
   <div class="upgradeTitle">📺 Watch Ad</div>
-  <div class="upgradeDesc">Vizionează o reclamă simulată și primește instant 1000 ZX.</div>
+  <div class="upgradeDesc">Vizionează o reclamă și primește instant 1000 ZX.</div>
   <button id="watchAdBtn" class="btn" style="width:100%;margin-top:12px;">+1000 ZX</button>
  </div>
  <div class="upgradeCard" style="margin-bottom:14px;">
@@ -457,7 +473,7 @@ body::before{
 </div>
 
 <div id="rankTab" class="section hidden">
- <h2 style="margin-bottom:20px; color:#d9fff5;">🏆 Rank</h2>
+ <h2 style="margin-bottom:20px; color:#d9fff5;">🏆 Global Leaderboard</h2>
  <div id="leaderboard"></div>
  <div style="margin-top:25px; height:2px; background: linear-gradient(90deg, transparent, #9d4dff, transparent); box-shadow: 0 0 20px #9d4dff;"></div>
  <div style="margin-top:20px; background: rgba(157,77,255,.08); border: 1px solid rgba(157,77,255,.3); border-radius:20px; padding:18px;">
@@ -470,7 +486,7 @@ body::before{
 
 <div id="rechargeModal" style="display:none; position:fixed; inset:0; background: rgba(0,0,0,.8); backdrop-filter: blur(10px); z-index:5000; justify-content:center; align-items:center;">
  <div style="width:90%; max-width:420px; background: #101827; border-radius:24px; border: 1px solid rgba(0,245,212,.2); padding:22px;">
-  <h2>📺 Vizionează 3 Reclame</h2>
+  <h2>📺 Vizionează Reclame</h2>
   <p style="margin-top:10px; color:#87a39d;">După finalizare energia va fi restaurată complet.</p>
   <div id="adCounter" style="margin-top:16px; font-size:24px; font-weight:900;">0 / 3</div>
   <button id="watchRechargeAd" class="btn" style="width:100%; margin-top:16px;">Watch Ad</button>
@@ -493,10 +509,11 @@ var currentUser = { username: 'guest', firstName: 'Guest' };
 
 if (tg) {
   tg.ready();
+  tg.expand();
   var user = tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
   if (user) {
-    currentUser.username = user.username || ('user' + user.id);
-    currentUser.firstName = user.first_name || 'Player';
+    currentUser.username = user.username || ('id' + user.id);
+    currentUser.firstName = user.first_name || user.username || 'Player';
   }
 }
 
@@ -506,7 +523,7 @@ var STORAGE_KEY = 'zx-network-state';
 var state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
 state = {
   balance: state.balance || 0,
-  energy: state.energy || 500,
+  energy: state.energy !== undefined ? state.energy : 500,
   maxEnergy: state.maxEnergy || 500,
   tapLevel: state.tapLevel || 0,
   energyLevel: state.energyLevel || 0,
@@ -523,22 +540,28 @@ function formatNumber(v) {
   return Number(v).toLocaleString('ro-RO');
 }
 
+// Sistem de de-bouncing (Prevenire spam server): Trimite datele doar la 1.5s de la oprirea click-urilor
+var syncTimeout = null;
 function syncWithServer() {
   if (currentUser.username === 'guest') return;
-  fetch('/api/sync', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: currentUser.username, balance: state.balance })
-  })
-  .then(function(r) { return r.json(); })
-  .then(function(data) {
-    if (data.balance !== undefined && data.balance !== state.balance) {
-      state.balance = data.balance;
-      saveState();
-      updateUI();
-    }
-  })
-  .catch(function(e) { console.error(e); });
+  if (syncTimeout) clearTimeout(syncTimeout);
+  
+  syncTimeout = setTimeout(function() {
+    fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: currentUser.username, balance: state.balance })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.balance !== undefined && data.balance !== state.balance) {
+        state.balance = data.balance;
+        saveState();
+        updateUI();
+      }
+    })
+    .catch(function(e) { console.error("Sync Error: ", e); });
+  }, 1500);
 }
 
 async function fetchLeaderboard() {
@@ -557,6 +580,11 @@ async function updateLeaderboardUI() {
   if (!board) return;
   board.innerHTML = '';
   var userRank = '-';
+  
+  if (entries.length === 0) {
+    board.innerHTML = '<div style="color:var(--muted);text-align:center;padding:20px;">No global players synchronized yet.</div>';
+  }
+
   for (var i = 0; i < entries.length; i++) {
     var entry = entries[i];
     var isMe = (entry.username === currentUser.username);
@@ -564,7 +592,7 @@ async function updateLeaderboardUI() {
     div.className = 'leaderboardItem';
     div.innerHTML =
       '<span class="leaderboardRank">#' + (i + 1) + '</span>' +
-      '<span class="leaderboardName" style="' + (isMe ? 'color:#00ff87; font-weight:bold' : '') + '">' + entry.username + '</span>' +
+      '<span class="leaderboardName" style="' + (isMe ? 'color:#00ff87; font-weight:bold' : '') + '">' + (isMe ? entry.username + ' (Tu)' : entry.username) + '</span>' +
       '<span class="leaderboardBalance">' + formatNumber(entry.balance) + ' ZX</span>';
     board.appendChild(div);
     if (isMe) userRank = '#' + (i + 1);
@@ -578,10 +606,8 @@ function updateUI() {
   document.getElementById('walletBalance').innerText = formatNumber(state.balance);
   var percent = (state.energy / state.maxEnergy) * 100;
   document.getElementById('energyFill').style.width = percent + '%';
-  var tapBtn = document.getElementById('buyTapUpgrade');
-  tapBtn.disabled = state.balance < getTapUpgradeCost();
-  var energyBtn = document.getElementById('buyEnergyUpgrade');
-  energyBtn.disabled = state.balance < getEnergyUpgradeCost();
+  document.getElementById('buyTapUpgrade').disabled = state.balance < getTapUpgradeCost();
+  document.getElementById('buyEnergyUpgrade').disabled = state.balance < getEnergyUpgradeCost();
 }
 
 function getTapUpgradeCost() { return 1000 * Math.pow(state.tapLevel + 1, 2); }
@@ -589,10 +615,25 @@ function getEnergyUpgradeCost() { return 2500 * Math.pow(state.energyLevel + 1, 
 
 function gainTap(event) {
   if (state.energy <= 0) return;
+  
   var gain = 1 + state.tapLevel;
   state.balance += gain;
   state.energy -= 1;
-  var x = event.clientX, y = event.clientY;
+  
+  // Coordonate precise pentru floating text independent de platformă
+  var rect = document.getElementById('coin').getBoundingClientRect();
+  var x, y;
+  if (event.clientX && event.clientY) {
+    x = event.clientX;
+    y = event.clientY;
+  } else if (event.touches && event.touches[0]) {
+    x = event.touches[0].clientX;
+    y = event.touches[0].clientY;
+  } else {
+    x = rect.left + rect.width / 2;
+    y = rect.top + rect.height / 2;
+  }
+  
   spawnFloat(gain, x, y);
   saveState();
   updateUI();
@@ -604,12 +645,23 @@ function spawnFloat(value, posX, posY) {
   el.className = 'floatGain';
   el.innerText = '+' + value;
   el.style.left = posX + 'px';
-  el.style.top = posY + 'px';
+  el.style.top = (posY - 20) + 'px';
   document.body.appendChild(el);
-  setTimeout(function() { el.remove(); }, 900);
+  setTimeout(function() { el.remove(); }, 850);
 }
 
-document.getElementById('coin').addEventListener('click', gainTap);
+// Securizarea și optimizarea mecanismului de atingere (Elimină selecția și întârzierile)
+var coin = document.getElementById('coin');
+coin.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  gainTap(e);
+}, { passive: false });
+
+coin.addEventListener('click', function(e) {
+  if (e.button === 0 && !('ontouchstart' in window)) { 
+    gainTap(e);
+  }
+});
 
 document.querySelectorAll('.tabBtn').forEach(function(btn) {
   btn.addEventListener('click', function() {
@@ -621,6 +673,15 @@ document.querySelectorAll('.tabBtn').forEach(function(btn) {
     document.getElementById('walletTab').classList.add('hidden');
     document.getElementById('rankTab').classList.add('hidden');
     document.getElementById(tab + 'Tab').classList.remove('hidden');
+    
+    // Forțează sincronizarea imediată când utilizatorul navighează
+    if (currentUser.username !== 'guest') {
+      fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: currentUser.username, balance: state.balance })
+      });
+    }
     if (tab === 'rank') updateLeaderboardUI();
   });
 });
@@ -633,7 +694,15 @@ function claimTask(id, reward, btn) {
   btn.disabled = true;
   saveState();
   updateUI();
-  syncWithServer();
+  
+  // Sincronizare forțată instantă pentru Task-uri
+  if (currentUser.username !== 'guest') {
+    fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: currentUser.username, balance: state.balance })
+    });
+  }
 }
 
 document.getElementById('taskTelegram').addEventListener('click', function() { claimTask('tg', 500, this); });
@@ -646,8 +715,9 @@ document.getElementById('watchAdBtn').addEventListener('click', function() {
 });
 
 document.getElementById('connectWallet').addEventListener('click', function() {
+  if(state.walletConnected) return;
   state.walletConnected = true;
-  state.walletAddress = 'EQB-' + Math.random().toString(36).substring(2,12);
+  state.walletAddress = 'EQB-' + Math.random().toString(36).substring(2,12).toUpperCase() + Math.random().toString(36).substring(2,12).toUpperCase();
   document.getElementById('walletAddress').style.display = 'block';
   document.getElementById('walletAddress').innerText = state.walletAddress;
   saveState();
@@ -655,12 +725,17 @@ document.getElementById('connectWallet').addEventListener('click', function() {
   syncWithServer();
 });
 
-async function deleteAccount() {
-  if (!confirm('Ești sigur că vrei să ștergi contul?')) return;
+// Restaurare stare wallet la reîncărcare
+if(state.walletConnected && state.walletAddress !== '') {
+  document.getElementById('walletAddress').style.display = 'block';
+  document.getElementById('walletAddress').innerText = state.walletAddress;
+}
+
+document.getElementById('deleteAccountBtn').addEventListener('click', function() {
+  if (!confirm('Ești sigur că vrei să ștergi contul local?')) return;
   localStorage.removeItem(STORAGE_KEY);
   location.reload();
-}
-document.getElementById('deleteAccountBtn').addEventListener('click', deleteAccount);
+});
 
 var adCount = 0;
 document.getElementById('rechargeBtn').addEventListener('click', function() {
@@ -675,6 +750,7 @@ document.getElementById('watchRechargeAd').addEventListener('click', function() 
     state.energy = state.maxEnergy;
     saveState();
     updateUI();
+    document.getElementById('rechargeModal').style.display = 'none';
     syncWithServer();
   }
 });
@@ -707,7 +783,8 @@ document.getElementById('buyEnergyUpgrade').addEventListener('click', function()
 updateUI();
 </script>
 </body>
-</html>`
+</html>
+`
 
 func main() {
 	token := "8744648391:AAHbsnd54wrv686PkLCbtj4ueBm4DqEB4vQ"
@@ -715,7 +792,7 @@ func main() {
 	var err error
 	bot, err = tgbotapi.NewBotAPI(token)
 	if err != nil {
-		log.Fatal(err)
+		log.Println("⚠️ Telegram Bot Token-ul nu este valid sau lipsește conexiunea:", err)
 	}
 
 	http.HandleFunc("/api/sync", handleSync)
@@ -732,6 +809,6 @@ func main() {
 		port = "8080"
 	}
 
-	log.Println("🚀 Server pornit pe portul " + port)
+	log.Println("🚀 Core-ul ZX Network este complet optimizat și pornit pe portul " + port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
