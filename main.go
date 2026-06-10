@@ -26,7 +26,7 @@ const (
 	TG_CHANNEL = "@ZXchatofficial"
 
 	// Block ID din dashboard-ul Adsgram (https://dev.adsgram.ai)
-	ADSGRAM_BLOCK_ID = "34736"
+	ADSGRAM_BLOCK_ID = "34749"
 
 	// URL-ul aplicației tale pe Render (fără slash la final)
 	APP_URL = "https://zx-elite-core.onrender.com"
