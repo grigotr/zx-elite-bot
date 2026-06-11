@@ -52,6 +52,7 @@ const (
 type PlayerState struct {
 	Username      string       `json:"username"`
 	FirstName     string       `json:"firstName"`
+	PhotoURL      string       `json:"photoUrl"`      // Telegram profile photo URL
 	Balance       int64        `json:"balance"`
 	TapLevel      int          `json:"tapLevel"`
 	EnergyLevel   int          `json:"energyLevel"`
@@ -84,6 +85,7 @@ type Database struct {
 type SyncRequest struct {
 	Username     string `json:"username"`
 	FirstName    string `json:"firstName"`
+	PhotoURL     string `json:"photoUrl"`
 	Balance      int64  `json:"balance"`
 	TapLevel     int    `json:"tapLevel"`
 	EnergyLevel  int    `json:"energyLevel"`
@@ -100,6 +102,7 @@ type SyncResponse struct {
 type LeaderboardEntry struct {
 	Username  string `json:"username"`
 	FirstName string `json:"firstName"`
+	PhotoURL  string `json:"photoUrl"`
 	Balance   int64  `json:"balance"`
 	Rank      int    `json:"rank"`
 }
@@ -442,6 +445,9 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 	if req.FirstName != "" {
 		p.FirstName = req.FirstName
 	}
+	if req.PhotoURL != "" {
+		p.PhotoURL = req.PhotoURL
+	}
 	passiveEarned := computePassiveEarned(p)
 	p.LastPassive = time.Now()
 	validated := validateBalanceIncrease(p, req.Balance+passiveEarned, req.TapLevel, req.PassiveLevel, req.EnergyLevel)
@@ -461,7 +467,15 @@ func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 			if name == "" {
 				name = u
 			}
-			list = append(list, LeaderboardEntry{Username: u, FirstName: name, Balance: s.Balance})
+			// Include passive income earned while offline so ranking
+			// reflects true balance even for players not currently online
+			effectiveBalance := s.Balance + computePassiveEarned(s)
+			list = append(list, LeaderboardEntry{
+				Username:  u,
+				FirstName: name,
+				PhotoURL:  s.PhotoURL,
+				Balance:   effectiveBalance,
+			})
 		}
 	}
 	db.mu.RUnlock()
@@ -1479,7 +1493,7 @@ body::before{
 
 // ─── Telegram ────────────────────────────────────────────────────────────────
 var tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
-var cu = { username:'guest', firstName:'Guest', id:0 };
+var cu = { username:'guest', firstName:'Guest', id:0, photoUrl:'' };
 if(tg){
   tg.ready(); tg.expand();
   if(tg.disableVerticalSwipes) tg.disableVerticalSwipes();
@@ -1488,9 +1502,22 @@ if(tg){
     cu.username  = u.username || ('id'+u.id);
     cu.firstName = u.first_name || u.username || 'Player';
     cu.id        = u.id || 0;
+    cu.photoUrl  = u.photo_url || '';
   }
 }
 document.getElementById('headerName').textContent = cu.firstName;
+
+// Set header avatar (small photo next to name)
+(function(){
+  var hdr = document.querySelector('.userBox');
+  if(cu.photoUrl && hdr){
+    var img = document.createElement('img');
+    img.src = cu.photoUrl;
+    img.style.cssText = 'width:32px;height:32px;border-radius:50%;object-fit:cover;border:2px solid rgba(0,245,212,.4);margin-bottom:2px;';
+    img.onerror = function(){ this.style.display='none'; };
+    hdr.insertBefore(img, hdr.firstChild);
+  }
+})();
 
 // ─── Level caps ───────────────────────────────────────────────────────────────
 var MAX_LVL = 20;
@@ -1652,8 +1679,24 @@ function restoreTaskButtons(){
 }
 
 function updateProfileTab(){
-  var initial = cu.firstName ? cu.firstName.charAt(0).toUpperCase() : '?';
-  document.getElementById('profileAvatar').textContent   = initial;
+  // Avatar: real Telegram photo if available, else colored initial
+  var avatarEl = document.getElementById('profileAvatar');
+  if(cu.photoUrl){
+    avatarEl.innerHTML = '';
+    avatarEl.style.background = 'none';
+    avatarEl.style.padding = '0';
+    var img = document.createElement('img');
+    img.src = cu.photoUrl;
+    img.style.cssText = 'width:100%;height:100%;border-radius:50%;object-fit:cover;';
+    img.onerror = function(){
+      avatarEl.style.background = 'linear-gradient(135deg,var(--green),var(--purple))';
+      avatarEl.textContent = cu.firstName ? cu.firstName.charAt(0).toUpperCase() : '?';
+    };
+    avatarEl.appendChild(img);
+  } else {
+    avatarEl.style.background = 'linear-gradient(135deg,var(--green),var(--purple))';
+    avatarEl.textContent = cu.firstName ? cu.firstName.charAt(0).toUpperCase() : '?';
+  }
   document.getElementById('profileName').textContent     = cu.firstName || '—';
   document.getElementById('profileUsername').textContent = '@' + cu.username;
   document.getElementById('profileBalance').textContent  = fmt(state.balance) + ' ZX';
@@ -1694,7 +1737,7 @@ function syncNow(immediate){
     fetch('/api/sync',{
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        username:cu.username, firstName:cu.firstName,
+        username:cu.username, firstName:cu.firstName, photoUrl:cu.photoUrl,
         balance:state.balance, tapLevel:state.tapLevel,
         energyLevel:state.energyLevel, passiveLevel:state.passiveLevel,
         telegramId:cu.id
@@ -1962,17 +2005,43 @@ function loadLeaderboard(){
     entries.forEach(function(e,i){
       var isMe=e.username===cu.username;
       if(isMe) myRank='#'+(i+1);
-      // Show firstName if available, fallback to username
       var displayName = e.firstName && e.firstName !== e.username ? e.firstName : e.username;
-      var d=document.createElement('div'); d.className='leaderboardItem';
-      d.innerHTML='<span class="leaderboardRank">'+(medals[i]||'#'+(i+1))+'</span>'+
-        '<span class="leaderboardName" style="'+(isMe?'color:#00ff87;font-weight:900;':'')+'">'+(isMe?displayName+' ◀':displayName)+'</span>'+
+      var initial = displayName ? displayName.charAt(0).toUpperCase() : '?';
+
+      // Build avatar HTML: real photo if available, else colored initial
+      var avatarHtml;
+      if(e.photoUrl){
+        avatarHtml = '<img src="'+e.photoUrl+'" '+
+          'style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0;border:2px solid '+(isMe?'var(--green)':'rgba(255,255,255,.15)')+';background:#1a2940;" '+
+          'onerror="this.outerHTML=\'<div style=\\\'width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--green),var(--purple));display:flex;align-items:center;justify-content:center;font-weight:900;font-size:15px;flex-shrink:0;\\\'>\'+\''+initial+'\'+\'</div>\'">';
+      } else {
+        var colors = ['135deg,#00f5d4,#9d4dff','135deg,#ff9f43,#e74c3c','135deg,#3b82f6,#9d4dff','135deg,#00ff87,#0098EA'];
+        var bg = colors[i % colors.length];
+        avatarHtml = '<div style="width:38px;height:38px;border-radius:50%;background:linear-gradient('+bg+');display:flex;align-items:center;justify-content:center;font-weight:900;font-size:15px;flex-shrink:0;border:2px solid '+(isMe?'var(--green)':'rgba(255,255,255,.1)')+';">'+initial+'</div>';
+      }
+
+      var rankHtml;
+      if(i<3){
+        rankHtml='<span style="font-size:20px;width:28px;text-align:center;">'+medals[i]+'</span>';
+      } else {
+        rankHtml='<span class="leaderboardRank">#'+(i+1)+'</span>';
+      }
+
+      var d=document.createElement('div');
+      d.className='leaderboardItem';
+      d.style.gap='10px';
+      d.innerHTML=
+        rankHtml+
+        avatarHtml+
+        '<span class="leaderboardName" style="'+(isMe?'color:#00ff87;font-weight:900;':'')+'">'+
+          (isMe?displayName+' ◀':displayName)+
+        '</span>'+
         '<span class="leaderboardBalance">'+fmt(e.balance)+' ZX</span>';
       board.appendChild(d);
     });
     document.getElementById('myRank').textContent=myRank;
     document.getElementById('myBalanceRank').textContent=fmt(state.balance)+' ZX';
-  }).catch(function(){ board.innerHTML='<div style="color:#ff6b6b;text-align:center">Eroare.</div>'; });
+  }).catch(function(){ board.innerHTML='<div style="color:#ff6b6b;text-align:center">Eroare la încărcare.</div>'; });
 }
 
 // ─── Delete account ───────────────────────────────────────────────────────────
