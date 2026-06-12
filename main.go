@@ -31,7 +31,7 @@ const (
 	REWARD_JOIN_CHANNEL2 int64 = 1500
 	REWARD_TWITTER       int64 = 5000
 	REWARD_PARTNER_BOT   int64 = 20000
-	REWARD_DAILY_COMBO   int64 = 5000000 // 5.000.000 ZX
+	REWARD_DAILY_COMBO   int64 = 5000000 
 
 	LINK_CHANNEL  = "https://t.me/Swordstarsibot?start=_tgr_6ZeW5DBkNTli"
 	LINK_CHANNEL2 = "https://t.me/CandyAIOfficialbot?start=_tgr_92TSa084ODcy"
@@ -74,8 +74,8 @@ type PlayerState struct {
 	Referrals          []string       `json:"referrals"`
 	LastPassive        time.Time      `json:"lastPassive"`
 	PassiveLevel       int            `json:"passiveLevel"`
-	OwnedCards         map[string]int `json:"ownedCards"`         // ID -> Level
-	LastDailyComboDate string         `json:"lastDailyComboDate"` // YYYY-MM-DD
+	OwnedCards         map[string]int `json:"ownedCards"`         
+	LastDailyComboDate string         `json:"lastDailyComboDate"` 
 	SyncHistory        []SyncRecord   `json:"syncHistory"`
 	TelegramID         int64          `json:"telegramId"`
 	ClaimedTasks       []string       `json:"claimedTasks"`
@@ -93,7 +93,7 @@ type Database struct {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// GLOBAL STATE & CONFIG
+// GLOBAL STATE
 // ═════════════════════════════════════════════════════════════════════════════
 
 var (
@@ -112,24 +112,13 @@ var (
 		{ID: "license", Name: "License", BaseCost: 250000, CostMultiplier: 2.0, ProfitPerHour: 28000, Icon: "📜"},
 	}
 
-	// Combo-ul zilei (poate fi setat manual sau randomizat)
 	DailyComboIDs = []string{"marketing", "web3", "security"}
 )
 
-// ═════════════════════════════════════════════════════════════════════════════
-// DATABASE
-// ═════════════════════════════════════════════════════════════════════════════
-
-func newDatabase() *Database {
-	return &Database{Players: make(map[string]*PlayerState)}
-}
-
 func loadDatabase() *Database {
 	data, err := os.ReadFile(dbPath)
-	if err != nil {
-		return newDatabase()
-	}
-	d := newDatabase()
+	if err != nil { return &Database{Players: make(map[string]*PlayerState)} }
+	d := &Database{Players: make(map[string]*PlayerState)}
 	json.Unmarshal(data, d)
 	return d
 }
@@ -144,67 +133,34 @@ func saveDatabase() {
 func scheduleSave() {
 	saveMu.Lock()
 	defer saveMu.Unlock()
-	if saveTimer != nil {
-		saveTimer.Stop()
-	}
+	if saveTimer != nil { saveTimer.Stop() }
 	saveTimer = time.AfterFunc(5*time.Second, saveDatabase)
 }
-
-func startPeriodicSave() {
-	go func() {
-		for range time.NewTicker(60 * time.Second).C {
-			saveDatabase()
-		}
-	}()
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// PLAYER HELPERS
-// ═════════════════════════════════════════════════════════════════════════════
 
 func getOrCreatePlayer(username string, telegramID int64) *PlayerState {
 	p, ok := db.Players[username]
 	if !ok {
 		p = &PlayerState{
-			Username:     username,
-			LastSync:     time.Now(),
-			LastPassive:  time.Now(),
-			Referrals:    []string{},
-			SyncHistory:  []SyncRecord{},
-			ClaimedTasks: []string{},
-			OwnedCards:   make(map[string]int),
-			TelegramID:   telegramID,
+			Username: username, LastSync: time.Now(), LastPassive: time.Now(),
+			Referrals: []string{}, ClaimedTasks: []string{}, OwnedCards: make(map[string]int),
+			TelegramID: telegramID, ReferralCode: "ZX" + strconv.FormatInt(time.Now().UnixNano()%100000, 10),
 		}
-		p.ReferralCode = "ZX" + strconv.FormatInt(time.Now().UnixNano()%100000, 10)
 		db.Players[username] = p
 	}
-	if p.OwnedCards == nil {
-		p.OwnedCards = make(map[string]int)
-	}
+	if p.OwnedCards == nil { p.OwnedCards = make(map[string]int) }
 	return p
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// PASSIVE INCOME (MODIFICATĂ)
-// ═════════════════════════════════════════════════════════════════════════════
-
 func getPassivePerHour(p *PlayerState) int64 {
-	// Profit de bază din PassiveLevel
 	var total int64 = 0
 	if p.PassiveLevel > 0 {
 		lvl := p.PassiveLevel
-		if lvl > MAX_PASSIVE_LEVEL {
-			lvl = MAX_PASSIVE_LEVEL
-		}
+		if lvl > MAX_PASSIVE_LEVEL { lvl = MAX_PASSIVE_LEVEL }
 		total = int64(math.Round(100 * math.Pow(1.8, float64(lvl-1))))
 	}
-
-	// Profit din Carduri
 	for id, lvl := range p.OwnedCards {
 		for _, cfg := range Cards {
-			if cfg.ID == id {
-				total += cfg.ProfitPerHour * int64(lvl)
-			}
+			if cfg.ID == id { total += cfg.ProfitPerHour * int64(lvl) }
 		}
 	}
 	return total
@@ -212,18 +168,14 @@ func getPassivePerHour(p *PlayerState) int64 {
 
 func computePassiveEarned(p *PlayerState) int64 {
 	pph := getPassivePerHour(p)
-	if pph == 0 {
-		return 0
-	}
+	if pph == 0 { return 0 }
 	elapsed := time.Since(p.LastPassive)
-	if elapsed > 8*time.Hour {
-		elapsed = 8 * time.Hour
-	}
+	if elapsed > 8*time.Hour { elapsed = 8 * time.Hour }
 	return int64(elapsed.Hours() * float64(pph))
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// HANDLERS API
+// HANDLERS
 // ═════════════════════════════════════════════════════════════════════════════
 
 func enableCORS(w http.ResponseWriter) {
@@ -239,21 +191,13 @@ func jsonResp(w http.ResponseWriter, v interface{}) {
 
 func handleSync(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
-	if r.Method == http.MethodOptions {
-		return
-	}
+	if r.Method == http.MethodOptions { return }
 	var req struct {
-		Username     string `json:"username"`
-		Balance      int64  `json:"balance"`
-		TapLevel     int    `json:"tapLevel"`
-		PassiveLevel int    `json:"passiveLevel"`
-		TelegramID   int64  `json:"telegramId"`
+		Username string `json:"username"`; Balance int64 `json:"balance"`
+		TapLevel int `json:"tapLevel"`; PassiveLevel int `json:"passiveLevel"`; TelegramID int64 `json:"telegramId"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
-	if req.Username == "" || req.Username == "guest" {
-		return
-	}
-
+	if req.Username == "" || req.Username == "guest" { return }
 	db.mu.Lock()
 	p := getOrCreatePlayer(req.Username, req.TelegramID)
 	earned := computePassiveEarned(p)
@@ -263,384 +207,161 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 	p.PassiveLevel = req.PassiveLevel
 	db.mu.Unlock()
 	scheduleSave()
-
-	jsonResp(w, map[string]interface{}{"status": "ok", "balance": p.Balance, "passiveEarned": earned})
+	jsonResp(w, map[string]interface{}{"balance": p.Balance, "passiveEarned": earned})
 }
-
-// --- NOILE HANDLERE PENTRU CARDURI ---
 
 func handleGetCards(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
-	username := r.URL.Query().Get("username")
+	u := r.URL.Query().Get("username")
 	db.mu.RLock()
-	p := db.Players[username]
+	p := db.Players[u]
 	db.mu.RUnlock()
-
-	if p == nil {
-		http.Error(w, "Not found", 404)
-		return
-	}
-
+	if p == nil { return }
 	jsonResp(w, map[string]interface{}{
-		"configs": Cards,
-		"owned":   p.OwnedCards,
-		"combo":   DailyComboIDs,
+		"configs": Cards, "owned": p.OwnedCards, "combo": DailyComboIDs,
 		"claimed": p.LastDailyComboDate == time.Now().Format("2006-01-02"),
-		"pph":     getPassivePerHour(p),
+		"pph": getPassivePerHour(p),
 	})
 }
 
 func handleUpgradeCard(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
-	if r.Method != http.MethodPost {
-		return
-	}
-	var req struct {
-		Username string `json:"username"`
-		CardID   string `json:"cardId"`
-	}
+	var req struct { Username string `json:"username"`; CardID string `json:"cardId"` }
 	json.NewDecoder(r.Body).Decode(&req)
-
-	var cardCfg *CardConfig
-	for _, c := range Cards {
-		if c.ID == req.CardID {
-			cardCfg = &c
-			break
-		}
-	}
-	if cardCfg == nil {
-		return
-	}
-
 	db.mu.Lock()
+	defer db.mu.Unlock()
 	p := db.Players[req.Username]
-	if p == nil {
-		db.mu.Unlock()
-		return
-	}
-
-	currentLevel := p.OwnedCards[req.CardID]
-	cost := int64(float64(cardCfg.BaseCost) * math.Pow(cardCfg.CostMultiplier, float64(currentLevel)))
-
-	if p.Balance < cost {
-		db.mu.Unlock()
-		jsonResp(w, map[string]interface{}{"success": false, "message": "Balanță insuficientă!"})
-		return
-	}
-
+	if p == nil { return }
+	var cfg *CardConfig
+	for _, c := range Cards { if c.ID == req.CardID { cfg = &c; break } }
+	if cfg == nil { return }
+	cost := int64(float64(cfg.BaseCost) * math.Pow(cfg.CostMultiplier, float64(p.OwnedCards[req.CardID])))
+	if p.Balance < cost { jsonResp(w, map[string]interface{}{"success": false}); return }
 	p.Balance -= cost
 	p.OwnedCards[req.CardID]++
-	p.LastBalance = p.Balance
-	db.mu.Unlock()
 	scheduleSave()
-
-	jsonResp(w, map[string]interface{}{"success": true, "balance": p.Balance, "newLevel": p.OwnedCards[req.CardID]})
+	jsonResp(w, map[string]interface{}{"success": true, "balance": p.Balance})
 }
 
 func handleClaimCombo(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
-	var req struct {
-		Username string `json:"username"`
-	}
+	var req struct { Username string `json:"username"` }
 	json.NewDecoder(r.Body).Decode(&req)
-	today := time.Now().Format("2006-01-02")
-
 	db.mu.Lock()
+	defer db.mu.Unlock()
 	p := db.Players[req.Username]
-	if p == nil {
-		db.mu.Unlock()
-		return
-	}
-
-	if p.LastDailyComboDate == today {
-		db.mu.Unlock()
-		jsonResp(w, map[string]interface{}{"success": false, "message": "Combo revendicat deja!"})
-		return
-	}
-
-	ownedAll := true
-	for _, id := range DailyComboIDs {
-		if p.OwnedCards[id] < 1 {
-			ownedAll = false
-			break
-		}
-	}
-
-	if !ownedAll {
-		db.mu.Unlock()
-		jsonResp(w, map[string]interface{}{"success": false, "message": "Nu deții cardurile combo!"})
-		return
-	}
-
+	if p == nil { return }
+	today := time.Now().Format("2006-01-02")
+	if p.LastDailyComboDate == today { return }
+	for _, id := range DailyComboIDs { if p.OwnedCards[id] < 1 { return } }
 	p.Balance += REWARD_DAILY_COMBO
 	p.LastDailyComboDate = today
-	p.LastBalance = p.Balance
-	db.mu.Unlock()
 	scheduleSave()
-
-	jsonResp(w, map[string]interface{}{"success": true, "reward": REWARD_DAILY_COMBO})
-}
-
-// Handlerele existente rămân neschimbate (Leaderboard, Checkin, Referral etc.)
-func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
-	enableCORS(w)
-	db.mu.RLock()
-	var list []map[string]interface{}
-	for u, s := range db.Players {
-		if u != "guest" {
-			list = append(list, map[string]interface{}{"username": u, "balance": s.Balance, "photo": s.PhotoURL})
-		}
-	}
-	db.mu.RUnlock()
-	sort.Slice(list, func(i, j int) bool { return list[i]["balance"].(int64) > list[j]["balance"].(int64) })
-	if len(list) > 10 {
-		list = list[:10]
-	}
-	jsonResp(w, list)
-}
-
-func handleAppConfig(w http.ResponseWriter, r *http.Request) {
-	enableCORS(w)
-	jsonResp(w, map[string]interface{}{
-		"adsgramBlockId": ADSGRAM_BLOCK_ID,
-		"linkChannel":    LINK_CHANNEL,
-		"rewardAd":       REWARD_WATCH_AD,
-	})
+	jsonResp(w, map[string]interface{}{"success": true})
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// FRONTEND HTML
+// FRONTEND
 // ═════════════════════════════════════════════════════════════════════════════
 
 const webAppHTML = `<!DOCTYPE html>
-<html lang="ro">
+<html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <title>ZX Elite</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="https://sad.adsgram.ai/js/sad.min.js"></script>
 <style>
-:root{
-  --bg:#070b10;--panel:#0d1420;--panel2:#111b2b;
-  --green:#00f5d4;--green2:#00ff87;--text:#f3fffc;
-  --muted:#87a39d;--purple:#9d4dff;--orange:#ff9f43;
-  --border:rgba(255,255,255,.08);
-}
-*{margin:0;padding:0;box-sizing:border-box;}
-body{ background:var(--bg); color:var(--text); font-family:sans-serif; overflow-x:hidden; padding-bottom:100px; }
-.app{ max-width:600px; margin:auto; padding:15px; }
-.header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
-.section{ background:var(--panel); border-radius:24px; padding:20px; border:1px solid var(--border); margin-bottom:15px; }
-.balanceValue{ font-size:42px; font-weight:900; text-align:center; color:#fff; text-shadow:0 0 20px var(--green); margin:10px 0; }
-.pph-badge{ background:rgba(0,245,212,0.1); color:var(--green); border-radius:999px; padding:6px 12px; font-size:12px; font-weight:bold; display:inline-block; margin-bottom:10px; }
-.coin{ width:220px; height:220px; margin:20px auto; display:block; cursor:pointer; transition:transform 0.1s; }
-.coin:active{ transform:scale(0.94); }
-.bottomNav{ position:fixed; bottom:0; left:0; right:0; background:rgba(13,20,32,0.95); backdrop-filter:blur(10px); display:flex; padding:10px; border-top:1px solid var(--border); z-index:1000; }
-.tabBtn{ flex:1; background:none; border:none; color:var(--muted); font-size:10px; font-weight:bold; cursor:pointer; padding:10px; }
+:root{ --bg:#070b10; --panel:#0d1420; --green:#00f5d4; --text:#f3fffc; --muted:#87a39d; --orange:#ff9f43; --border:rgba(255,255,255,.08); }
+body{ background:var(--bg); color:var(--text); font-family:sans-serif; margin:0; padding-bottom:100px; }
+.app{ max-width:500px; margin:auto; padding:15px; }
+.section{ background:var(--panel); border-radius:20px; padding:20px; border:1px solid var(--border); margin-bottom:15px; }
+.balanceValue{ font-size:40px; font-weight:900; text-align:center; color:white; text-shadow:0 0 20px var(--green); margin:10px 0; }
+.coin{ width:200px; height:200px; margin:20px auto; display:block; cursor:pointer; }
+.bottomNav{ position:fixed; bottom:0; left:0; right:0; background:rgba(13,20,32,0.95); display:flex; padding:10px; border-top:1px solid var(--border); }
+.tabBtn{ flex:1; background:none; border:none; color:var(--muted); font-size:10px; font-weight:bold; cursor:pointer; }
 .tabBtn.active{ color:var(--green); }
-.btn{ border:none; padding:12px; border-radius:14px; font-weight:800; cursor:pointer; width:100%; margin-top:8px; background:var(--green); color:#000; }
-.btn:disabled{ opacity:0.4; }
+.btn{ border:none; padding:12px; border-radius:12px; font-weight:800; cursor:pointer; width:100%; background:var(--green); color:#000; }
 .hidden{ display:none; }
-
-/* BOOSTS STYLES */
-.combo-container{ background:linear-gradient(135deg, rgba(255,159,67,0.1), rgba(157,77,255,0.1)); border:1px dashed var(--orange); border-radius:20px; padding:15px; margin-bottom:20px; text-align:center; }
 .combo-grid{ display:flex; justify-content:center; gap:10px; margin:15px 0; }
-.combo-item{ width:50px; height:50px; background:var(--panel2); border-radius:12px; border:1px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:22px; }
-.combo-item.active{ border-color:var(--green); background:rgba(0,245,212,0.1); box-shadow:0 0 10px var(--green); }
-.cards-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-.card-node{ background:var(--panel2); border-radius:18px; border:1px solid var(--border); padding:15px; display:flex; flex-direction:column; gap:8px; }
-.card-icon{ font-size:24px; }
-.card-name{ font-weight:bold; font-size:14px; }
-.card-profit{ color:var(--green); font-size:11px; font-weight:bold; }
-.card-cost{ font-size:14px; font-weight:900; color:var(--orange); margin-top:auto; padding-top:10px; }
+.combo-item{ width:45px; height:45px; background:#111b2b; border:1px solid var(--border); border-radius:10px; display:flex; align-items:center; justify-content:center; }
+.combo-item.active{ border-color:var(--green); background:rgba(0,245,212,0.1); }
+.cards-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.card-node{ background:#111b2b; border-radius:15px; padding:12px; border:1px solid var(--border); }
 </style>
 </head>
 <body>
 <div class="app">
-    <div style="text-align:center">
-        <div class="pph-badge" id="pphDisplay">⚙️ +0 / oră</div>
-        <div id="balanceDisplay" class="balanceValue">0</div>
-    </div>
-
-    <!-- TAB GENERATOR -->
-    <div id="generatorTab" class="tab-content">
+    <div style="text-align:center"><div id="pphDisp" style="color:var(--green);font-size:12px;font-weight:bold">⚙️ +0/hr</div><div id="balDisp" class="balanceValue">0</div></div>
+    <div id="genTab" class="tab-content">
         <img id="coin" class="coin" src="https://cdn-icons-png.flaticon.com/512/8015/8015431.png">
-        <div class="section">
-            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px">
-                <span>⚡ Energie</span><span id="energyText">500/500</span>
-            </div>
-            <div style="width:100%;height:10px;background:#000;border-radius:10px;overflow:hidden">
-                <div id="energyFill" style="width:100%;height:100%;background:var(--green);transition:width 0.3s"></div>
-            </div>
+        <div class="section"><div style="display:flex;justify-content:space-between;font-size:12px"><span>⚡ Energie</span><span id="enTxt">500/500</span></div><div style="width:100%;height:8px;background:#000;border-radius:5px;margin-top:5px;overflow:hidden"><div id="enFill" style="width:100%;height:100%;background:var(--green)"></div></div></div>
+    </div>
+    <div id="bstTab" class="tab-content hidden">
+        <div class="section" style="text-align:center;border-color:var(--orange)">
+            <div style="font-weight:bold;color:var(--orange)">DAILY COMBO (+5M ZX)</div>
+            <div id="cmboGrd" class="combo-grid"></div>
+            <button id="clmCmbo" class="btn" style="background:var(--orange);color:#fff">Claim Bonus</button>
         </div>
+        <div id="crdsGrd" class="cards-grid"></div>
     </div>
-
-    <!-- TAB BOOSTS -->
-    <div id="boostsTab" class="tab-content hidden">
-        <div class="combo-container">
-            <div style="font-weight:bold;font-size:14px;color:var(--orange)">🚀 DAILY COMBO (+5.000.000 ZX)</div>
-            <div class="combo-grid" id="comboGrid"></div>
-            <button id="claimComboBtn" class="btn" style="background:var(--orange);color:#fff">Revendică Bonus</button>
-        </div>
-        <div class="cards-grid" id="cardsGrid"></div>
-    </div>
-
-    <!-- TAB RANK -->
-    <div id="rankTab" class="tab-content hidden">
-        <div class="section"><h3 style="margin-bottom:15px">🏆 Top Jucători</h3><div id="leaderboard"></div></div>
-    </div>
-
 </div>
-
 <nav class="bottomNav">
-    <button class="tabBtn active" data-tab="generator">⛏️ MINE</button>
-    <button class="tabBtn" data-tab="boosts">🚀 BOOSTS</button>
-    <button class="tabBtn" data-tab="rank">🏆 RANK</button>
+    <button class="tabBtn active" data-tab="gen">⛏️ MINE</button>
+    <button class="tabBtn" data-tab="bst">🚀 BOOSTS</button>
 </nav>
-
 <script>
 let tg = window.Telegram.WebApp;
-let cu = { username: tg.initDataUnsafe?.user?.username || 'guest', id: tg.initDataUnsafe?.user?.id || 0 };
-let state = { balance: 0, energy: 500, maxEnergy: 500, tapLvl: 1 };
-let ownedCards = {};
-let cardConfigs = [];
-let comboIDs = [];
-
+let cu = { un: tg.initDataUnsafe?.user?.username || 'guest', id: tg.initDataUnsafe?.user?.id || 0 };
+let st = { bal: 0, en: 500, mx: 500 };
 function fmt(n) { return Number(n).toLocaleString(); }
-
-async function sync() {
-    const res = await fetch('/api/sync', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ username: cu.username, balance: state.balance, tapLevel: state.tapLvl, telegramId: cu.id })
+async function load() {
+    const r = await fetch('/api/cards?username=' + cu.un);
+    const d = await r.json();
+    document.getElementById('pphDisp').textContent = '⚙️ +' + fmt(d.pph) + '/hr';
+    const grd = document.getElementById('crdsGrd'); grd.innerHTML = '';
+    d.configs.forEach(c => {
+        const lvl = d.owned[c.id] || 0;
+        const cst = Math.floor(c.baseCost * Math.pow(c.costMultiplier, lvl));
+        grd.innerHTML += '<div class="card-node"><b>'+c.icon+' '+c.name+'</b><div style="font-size:10px;color:var(--green)">+'+fmt(c.profitPerHour)+'/hr</div><div style="font-size:10px">Niv.'+lvl+'</div><div style="font-size:12px;color:var(--orange);margin:5px 0">💰 '+fmt(cst)+'</div><button class="btn" style="padding:5px;font-size:10px" onclick="upgr(\''+c.id+'\')">Upgrade</button></div>';
     });
-    const d = await res.json();
-    state.balance = d.balance;
-    updateUI();
-}
-
-async function loadCards() {
-    const res = await fetch('/api/cards?username=' + cu.username);
-    const d = await res.json();
-    cardConfigs = d.configs;
-    ownedCards = d.owned || {};
-    comboIDs = d.combo;
-    renderCards(d.claimed);
-    document.getElementById('pphDisplay').textContent = '⚙️ +' + fmt(d.pph) + ' / oră';
-}
-
-function renderCards(claimed) {
-    const grid = document.getElementById('cardsGrid');
-    grid.innerHTML = '';
-    cardConfigs.forEach(c => {
-        const lvl = ownedCards[c.id] || 0;
-        const cost = Math.floor(c.baseCost * Math.pow(c.costMultiplier, lvl));
-        grid.innerHTML += `
-            <div class="card-node">
-                <div class="card-icon">${c.icon}</div>
-                <div class="card-name">${c.name}</div>
-                <div class="card-profit">+${fmt(c.profitPerHour)}/hr</div>
-                <div style="font-size:10px;color:var(--muted)">Nivel ${lvl}</div>
-                <div class="card-cost">💰 ${fmt(cost)}</div>
-                <button class="btn" style="padding:6px;font-size:11px" onclick="upgradeCard('${c.id}')" ${state.balance < cost ? 'disabled' : ''}>Upgrade</button>
-            </div>
-        `;
+    const cGrd = document.getElementById('cmboGrd'); cGrd.innerHTML = '';
+    let has = 0;
+    d.combo.forEach(id => {
+        const ok = (d.owned[id] > 0); if(ok) has++;
+        cGrd.innerHTML += '<div class="combo-item '+(ok?'active':'')+'">'+(ok?'✅':'?')+'</div>';
     });
-
-    const cGrid = document.getElementById('comboGrid');
-    cGrid.innerHTML = '';
-    let ownedCount = 0;
-    comboIDs.forEach(id => {
-        const has = (ownedCards[id] > 0);
-        if(has) ownedCount++;
-        cGrid.innerHTML += `<div class="combo-item ${has ? 'active' : ''}">${has ? '✅' : '?'}</div>`;
-    });
-    const comboBtn = document.getElementById('claimComboBtn');
-    if(claimed) { comboBtn.textContent = 'RECOMPENSĂ REVENDICATĂ'; comboBtn.disabled = true; }
-    else { comboBtn.disabled = ownedCount < 3; }
+    document.getElementById('clmCmbo').disabled = (has < 3 || d.claimed);
 }
-
-async function upgradeCard(id) {
-    const res = await fetch('/api/upgrade', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ username: cu.username, cardId: id })
-    });
-    const d = await res.json();
-    if(d.success) { state.balance = d.balance; loadCards(); }
-    else alert(d.message);
+async function upgr(id) {
+    const r = await fetch('/api/upgrade', { method:'POST', body: JSON.stringify({username:cu.un, cardId:id}) });
+    const d = await r.json(); if(d.success) { st.bal = d.balance; load(); }
 }
-
-document.getElementById('claimComboBtn').onclick = async () => {
-    const res = await fetch('/api/combo/claim', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ username: cu.username })
-    });
-    const d = await res.json();
-    if(d.success) { alert("Felicitări! Ai primit 5M ZX!"); loadCards(); }
-};
-
-function updateUI() {
-    document.getElementById('balanceDisplay').textContent = fmt(Math.floor(state.balance));
-    document.getElementById('energyText').textContent = state.energy + '/' + state.maxEnergy;
-    document.getElementById('energyFill').style.width = (state.energy/state.maxEnergy*100) + '%';
-}
-
-document.getElementById('coin').onclick = () => {
-    if(state.energy > 0) {
-        state.balance += state.tapLvl;
-        state.energy -= 1;
-        updateUI();
-    }
-};
-
-document.querySelectorAll('.tabBtn').forEach(b => {
-    b.onclick = () => {
-        document.querySelectorAll('.tabBtn').forEach(x => x.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(x => x.classList.add('hidden'));
-        b.classList.add('active');
-        document.getElementById(b.dataset.tab + 'Tab').classList.remove('hidden');
-        if(b.dataset.tab === 'boosts') loadCards();
-    };
+document.getElementById('coin').onclick = () => { if(st.en > 0) { st.bal++; st.en--; ui(); } };
+function ui() { document.getElementById('balDisp').textContent = fmt(Math.floor(st.bal)); document.getElementById('enTxt').textContent = st.en+'/500'; document.getElementById('enFill').style.width = (st.en/5)+'%'; }
+document.querySelectorAll('.tabBtn').forEach(b => b.onclick = () => {
+    document.querySelectorAll('.tabBtn').forEach(x => x.classList.remove('active')); b.classList.add('active');
+    document.querySelectorAll('.tab-content').forEach(x => x.classList.add('hidden')); document.getElementById(b.dataset.tab+'Tab').classList.remove('hidden');
+    if(b.dataset.tab === 'bst') load();
 });
-
-setInterval(sync, 5000);
-setInterval(() => { if(state.energy < state.maxEnergy) { state.energy++; updateUI(); } }, 2000);
-sync();
+document.getElementById('clmCmbo').onclick = async () => { const r = await fetch('/api/combo/claim', { method:'POST', body:JSON.stringify({username:cu.un}) }); if(r.ok) location.reload(); };
+setInterval(ui, 100); setInterval(() => { if(st.en < 500) st.en++; }, 2000);
+load();
 </script>
 </body>
 </html>`
 
-// ═════════════════════════════════════════════════════════════════════════════
-// MAIN & ROUTES
-// ═════════════════════════════════════════════════════════════════════════════
-
 func main() {
 	db = loadDatabase()
-	startPeriodicSave()
-
-	token := os.Getenv("TELEGRAM_TOKEN")
-	if token != "" {
-		bot, _ = tgbotapi.NewBotAPI(token)
-	}
-
 	http.HandleFunc("/api/sync", handleSync)
-	http.HandleFunc("/api/leaderboard", handleLeaderboard)
 	http.HandleFunc("/api/cards", handleGetCards)
 	http.HandleFunc("/api/upgrade", handleUpgradeCard)
 	http.HandleFunc("/api/combo/claim", handleClaimCombo)
-	http.HandleFunc("/api/config", handleAppConfig)
-
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(webAppHTML))
 	})
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	p := os.Getenv("PORT")
+	if p == "" { p = "8080" }
+	log.Fatal(http.ListenAndServe(":"+p, nil))
 }
